@@ -55,7 +55,7 @@ def main(args):
     TRAIN_IMG_SIZE = args.train_img_size
     WEIGHT_PATH = f"./crop_4096_1024/fold_{FOLD}"
     ITERS = 100
-    
+
     df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
     input_path = "../input/zarr_train"
 
@@ -74,7 +74,7 @@ def main(args):
             img_ids=train_img_ids,
             img_path=input_path,
             transform=baseline_aug(TRAIN_IMG_SIZE),
-            iterations=ITERS*BATCH_SIZE,
+            iterations=ITERS * BATCH_SIZE,
         )
     )
     model = smp.Unet("resnet34").cuda()
@@ -103,7 +103,9 @@ def main(args):
                     step=CROP_SIZE,
                 )
             )
-            metrics_val = validation_full_image(val_loader, model, loss_fn, rle=df.loc[img_id, "encoding"])
+            metrics_val = validation_full_image(
+                val_loader, model, loss_fn, rle=df.loc[img_id, "encoding"]
+            )
             images_dice[img_id] = metrics_val["dice_full"]
             dice_mean.append(metrics_val["dice_mean"])
             val_loss.append(metrics_val["loss_val"])
