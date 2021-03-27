@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
-from src.utils.utils import create_dataset
+from src.utils.utils import create_dataset, create_pdfs
 from tqdm import tqdm
 
 if __name__ == "__main__":
@@ -12,12 +12,15 @@ if __name__ == "__main__":
     train_info = pd.read_csv(INPUT_PATH / "HuBMAP-20-dataset_information.csv")
     train_tiffs = list((INPUT_PATH / "train").glob("*.tiff"))
 
-    meta_data = []
-    for _, row in tqdm(df_train.iterrows(), total=len(df_train)):
-        meta = create_dataset(
-            row["id"], row["encoding"], 4096, PATH_FOR_CROPS, resize=1024,
-        )
-        meta_data.extend(meta)
+    # meta_data = []
+    # for _, row in tqdm(df_train.iterrows(), total=len(df_train)):
+    #     meta = create_dataset(
+    #         row["id"], row["encoding"], 4096, PATH_FOR_CROPS, resize=1024,
+    #     )
+    #     meta_data.extend(meta)
 
-    df = pd.DataFrame(meta_data)
-    df.to_csv(PATH_FOR_CROPS + "/meta.csv", index=False)
+    # df = pd.DataFrame(meta_data)
+    # df.to_csv(PATH_FOR_CROPS + "/meta.csv", index=False)
+
+    create_pdfs(df_train)
+

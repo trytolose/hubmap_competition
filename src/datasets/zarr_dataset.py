@@ -4,6 +4,7 @@ from pathlib import Path
 import zarr
 import numpy as np
 import math
+from scipy.special import softmax
 
 IMG_SIZES = {
     "2f6ecfcdf": (31278, 25794),
@@ -43,13 +44,25 @@ IMG_SIZES_X4 = {
 
 
 class ZarrTrainDataset(Dataset):
-    def __init__(self, img_ids, img_path, transform, iterations=1000, crop_size=1024):
+    def __init__(
+        self,
+        img_ids,
+        img_path,
+        transform,
+        iterations=1000,
+        crop_size=1024,
+        pdf_path=None,
+    ):
         self.crop_size = crop_size
         self.transform = transform
         self.iterations = iterations
         self.img_ids = img_ids
         self.img_path = img_path
         self.zarr = zarr.open(self.img_path, mode="r")
+        self.pdf = None
+        self.coord = np.arange(512 ** 2)
+        if pdf_path is not None:
+            self.pdf = zarr.open(pdf_path, mode="r")
 
     def __len__(self):
         return self.iterations
@@ -57,14 +70,33 @@ class ZarrTrainDataset(Dataset):
     def __getitem__(self, idx):
         img_id = np.random.choice(self.img_ids)
         h, w = IMG_SIZES_X4[img_id]
-        x = np.random.randint(0, w - self.crop_size)
-        y = np.random.randint(0, h - self.crop_size)
+
+        if self.pdf is not None:
+            pdf_mask = self.pdf[img_id]
+            x, y = self._get_corner(pdf_mask)
+            scale_x, scale_y = w / 512, h / 512
+            x = int(scale_x * x)
+            y = int(scale_y * y)
+            if x + self.crop_size > w:
+                x = w - self.crop_size
+            if y + self.crop_size > h:
+                y = h - self.crop_size
+        else:
+            x = np.random.randint(0, w - self.crop_size)
+            y = np.random.randint(0, h - self.crop_size)
         img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
         mask = self.zarr[img_id + "_mask"][
             y : y + self.crop_size, x : x + self.crop_size
         ]
         transormed = self.transform(image=img, mask=mask)
         return transormed["image"], transormed["mask"].unsqueeze(0).float()
+
+    def _get_corner(self, pdf):
+        probs = softmax(pdf).reshape(-1,)
+        left_top_point = np.random.choice(self.coord, size=1, p=probs)[0]
+        x, y = np.unravel_index([left_top_point], (512, 512))
+        x, y = x[0], y[0]
+        return x, y
 
 
 class ZarrValidDataset(Dataset):
@@ -89,7 +121,7 @@ class ZarrValidDataset(Dataset):
             x = self.w - self.crop_size
         if y + self.crop_size > self.h:
             y = self.h - self.crop_size
-        
+
         img = self.zarr[self.tiff_id][y : y + self.crop_size, x : x + self.crop_size]
         crop_mask = self.zarr[self.tiff_id + "_mask"][
             y : y + self.crop_size, x : x + self.crop_size

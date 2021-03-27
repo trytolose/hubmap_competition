@@ -174,3 +174,36 @@ def create_dataset(
     gc.collect()
 
     return meta_info
+
+
+def create_pdfs(
+    df, output_path="../input/zarr_pdf", path="/hdd/kaggle/hubmap/input_v2/train/"
+):
+
+    g_out = zarr.group(output_path)
+    w_dict = {
+        "Medulla": 0.25,
+        "Cortex": 0.5,
+        "Outer Stripe": 0.25,
+        "Inner medulla": 0.25,
+        "Outer Medulla": 0.25,
+    }
+
+    for _, row in tqdm(df.iterrows(), total=len(df)):
+        img_id = row["id"]
+        img_path = Path(path) / f"{img_id}.tiff"
+        img = rasterio.open(img_path, num_threads="all_cpus")
+        h, w = img.height, img.width
+
+        json_path = Path(path) / f"{img_id}-anatomical-structure.json"
+        mask = np.zeros((h, w), dtype=np.float32)
+        with open(json_path, "r") as read_file:
+            data = json.load(read_file)
+            for d in data:
+                class_name = d["properties"]["classification"]["name"]
+                points = d["geometry"]["coordinates"][0]
+                points = np.array(points, dtype=np.int32).reshape((-1, 1, 2))
+                mask = cv2.fillPoly(mask, [points], w_dict[class_name])
+        mask = cv2.resize(mask, (512, 512))
+        g_out[img_id] = mask
+

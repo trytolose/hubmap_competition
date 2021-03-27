@@ -53,11 +53,12 @@ def main(args):
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
-    WEIGHT_PATH = f"./crop_4096_1024/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/crop_4096_1024_pdf/fold_{FOLD}"
     ITERS = 100
 
     df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
     input_path = "../input/zarr_train"
+    pdf_path = "../input/zarr_pdf"
 
     train_img_ids = [
         x for fold, fold_imgs in FOLD_IMGS.items() for x in fold_imgs if fold != FOLD
@@ -75,6 +76,7 @@ def main(args):
             img_path=input_path,
             transform=baseline_aug(TRAIN_IMG_SIZE),
             iterations=ITERS * BATCH_SIZE,
+            pdf_path=pdf_path,
         )
     )
     model = smp.Unet("resnet34").cuda()
