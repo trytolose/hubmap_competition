@@ -17,7 +17,9 @@ class CheckpointHandler:
             self.best_score = cur_score
             print("+", end="")
             chk_filename = self.chks_path / f"epoch_{epoch}_score_{cur_score:.4f}.pth"
-            current_chks = sorted(list(self.chks_path.glob("*.pth")))
+            current_chks = sorted(list(self.chks_path.glob("*.pth")), key=lambda x: x.stem.split("_")[-1])
+
+
             if len(current_chks) >= self.max_count:
                 try:
                     current_chks[0].unlink()

@@ -4,6 +4,7 @@ from src.utils.metrics import dice_numpy, dice_torch_batch
 from torch.cuda.amp import autocast
 from tqdm import tqdm
 from src.utils.utils import rle2mask
+from src.datasets.zarr_dataset import IMG_SIZES
 import cv2
 
 
@@ -11,7 +12,7 @@ def train(data_loader, model, optimizer, loss_fn, scaler):
     model.cuda()
     model.train()
     train_loss = []
-    for image, mask, _ in tqdm(data_loader, ncols=70, leave=False):
+    for image, mask in tqdm(data_loader, ncols=70, leave=False):
         optimizer.zero_grad()
         image = image.cuda()
         mask = mask.cuda()
@@ -44,13 +45,17 @@ def validation(data_loader, model, loss_fn):
     return metrics
 
 
-def validation_full_image(data_loader, model, loss_fn):
+def validation_full_image(data_loader, model, loss_fn, rle):
+    crop_size = data_loader.dataset.crop_size
+    img_id = data_loader.dataset.tiff_id
+    h, w = IMG_SIZES[img_id]
     model.eval()
     val_loss = []
     dice_metric = []
     dice_per_crop = []
-    # mask_true = rle2mask(rle, (img_size[1], img_size[0]))
-    # mask_pred = np.zeros(img_size, dtype=np.float16)
+    mask_true = rle2mask(rle, (w, h))
+    mask_true = cv2.resize(mask_true, (data_loader.dataset.w, data_loader.dataset.h))
+    mask_pred = np.zeros((data_loader.dataset.h, data_loader.dataset.w), dtype=np.float16)
     for image, mask, crop_names in tqdm(data_loader, ncols=70, leave=False):
         with torch.no_grad():
             image = image.cuda()
@@ -62,11 +67,11 @@ def validation_full_image(data_loader, model, loss_fn):
                 pred = pred.unsqueeze(0)
             dice_metric.append(dice_torch_batch(pred, mask, reduction="mean"))
             dice_per_crop.append(dice_torch_batch(pred, mask, reduction="numpy"))
-            # pred = pred.cpu().data.numpy().astype(np.float16)
-            # for predict_single, crop_name in zip(pred, crop_names):
-            #     x = int(crop_name.split("_")[-2])
-            #     y = int(crop_name.split("_")[-1])
-            #     mask_pred[y : y + crop_size, x : x + crop_size] = predict_single
+            pred = pred.cpu().data.numpy().astype(np.float16)
+            for predict_single, crop_name in zip(pred, crop_names):
+                x = int(crop_name.split("_")[-2])
+                y = int(crop_name.split("_")[-1])
+                mask_pred[y : y + crop_size, x : x + crop_size] = predict_single
     metrics = {}
     dice_per_crop = np.concatenate(dice_per_crop)
     # df_val = data_loader.dataset.df
@@ -74,7 +79,7 @@ def validation_full_image(data_loader, model, loss_fn):
     # empty_mask = df_val["glomerulus_pix"] == 0
     # metrics["dice_pos"] = dice_per_crop[non_empty_mask].mean()
     # metrics["dice_neg"] = dice_per_crop[empty_mask].mean()
-    # metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
+    metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
     metrics["dice_mean"] = np.array(dice_metric).mean()
     metrics["loss_val"] = np.mean(val_loss)
     return metrics
