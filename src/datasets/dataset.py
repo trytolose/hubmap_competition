@@ -40,13 +40,14 @@ class ImageDatasetV2(Dataset):
         img_path = self.img_paths[idx]
         mask_path = img_path.replace("images", "masks")
         img = cv2.imread(img_path)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         mask = cv2.imread(mask_path, 0)
         transormed = self.transforms(image=img, mask=mask)
-        return (
-            transormed["image"],
-            transormed["mask"].unsqueeze(0).float(),
-            Path(img_path).stem,
-        )
+        return {
+            "image": transormed["image"],
+            "mask": transormed["mask"].unsqueeze(0).float(),
+            "file_name": Path(img_path).stem,
+        }
 
 
 class SingleTiffDataset(Dataset):
@@ -85,15 +86,15 @@ class SingleTiffDataset(Dataset):
         if y + self.crop_size > self.h:
             y = self.h - self.crop_size
         window = Window(x, y, self.crop_size, self.crop_size)
-        img = read_from_layers(self.layers, window=window)  # [:, :, ::-1]
+        img = read_from_layers(self.layers, window=window)[:, :, ::-1]
         if self.mask is not None:
             crop_mask = self.mask[y : y + self.crop_size, x : x + self.crop_size]
             transormed = self.transform(image=img, mask=crop_mask)
-            return (
-                transormed["image"],
-                transormed["mask"].unsqueeze(0).float(),
-                f"{x}_{y}",
-            )
+            return {
+                "image": transormed["image"],
+                "mask": transormed["mask"].unsqueeze(0).float(),
+                "file_name": f"{x}_{y}",
+            }
         else:
             transormed = self.transform(image=img)
             return transormed["image"], f"{x}_{y}"

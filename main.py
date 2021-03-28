@@ -55,15 +55,23 @@ def main(args):
     TRAIN_IMG_SIZE = args.train_img_size
     WEIGHT_PATH = f"./weights/crop_4096_1024_pdf/fold_{FOLD}"
     ITERS = 100
+    IS_OLD_VALIDATION = True
 
     df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
     input_path = "../input/zarr_train"
     pdf_path = "../input/zarr_pdf"
+    crop_img_path = Path("../input/train_v3_4096_1024/images")
 
     train_img_ids = [
         x for fold, fold_imgs in FOLD_IMGS.items() for x in fold_imgs if fold != FOLD
     ]
     val_img_ids = FOLD_IMGS[FOLD]
+
+    val_img_paths = [
+        str(img)
+        for img in Path(crop_img_path).glob("*.png")
+        if img.stem.split("_")[0] in FOLD_IMGS[FOLD]
+    ]
 
     print(f"FOLD: {FOLD}")
 
@@ -79,56 +87,73 @@ def main(args):
             pdf_path=pdf_path,
         )
     )
+    old_val_loader = get_loader(
+        ImageDatasetV2(val_img_paths, valid_transform(TRAIN_IMG_SIZE)), shuffle=False,
+    )
+
     model = smp.Unet("resnet34").cuda()
-    # model.load_state_dict(torch.load("./first_launch/epoch_7_score_0.9234.pth"))
+    model.load_state_dict(
+        # torch.load("../submission/fold_0_zarr_pdf_epoch_34_score_0.9123.pth")
+        # torch.load("../submission/fold_0_4096to1024_epoch_49_score_0.9339.pth")
+        torch.load("weights/crop_4096_1024_old_loader/fold_0/epoch_38_score_0.9254.pth")
+    )
     loss_fn = nn.BCEWithLogitsLoss()
     optimizer = Adam(model.parameters(), lr=START_LR)
     scaler = GradScaler()
     scheduler = ReduceLROnPlateau(
         optimizer, mode="max", factor=0.4, patience=5, verbose=True
     )
-    cp_handler = CheckpointHandler(model, WEIGHT_PATH, 5)
+    # cp_handler = CheckpointHandler(model, WEIGHT_PATH, 5)
 
     for e in range(1, EPOCH + 1):
-        metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
+        # metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
         images_dice = {}
         dice_mean = []
         val_loss = []
         dice_pos, dice_neg = [], []
-        for img_id in val_img_ids:
-            val_loader = get_loader(
-                ZarrValidDataset(
-                    img_id,
-                    img_path=input_path,
-                    transform=valid_transform(CROP_SIZE),
-                    crop_size=CROP_SIZE,
-                    step=CROP_SIZE,
+        if IS_OLD_VALIDATION is True:
+            metrics_val = validation(old_val_loader, model, loss_fn)
+            image_dice_mean = 0
+            dice_mean = metrics_val["dice_mean"]
+            val_loss = metrics_val["loss_val"]
+            dice_pos = metrics_val["dice_pos"]
+            dice_neg = metrics_val["dice_neg"]
+        else:
+            for img_id in val_img_ids:
+                val_loader = get_loader(
+                    ZarrValidDataset(
+                        img_id,
+                        img_path=input_path,
+                        transform=valid_transform(CROP_SIZE),
+                        crop_size=CROP_SIZE,
+                        step=CROP_SIZE,
+                    )
                 )
-            )
-            metrics_val = validation_full_image(
-                val_loader, model, loss_fn, rle=df.loc[img_id, "encoding"]
-            )
-            images_dice[img_id] = metrics_val["dice_full"]
-            dice_mean.append(metrics_val["dice_mean"])
-            val_loss.append(metrics_val["loss_val"])
-            dice_pos.append(metrics_val["dice_pos"])
-            dice_neg.append(metrics_val["dice_neg"])
+                metrics_val = validation_full_image(
+                    val_loader, model, loss_fn, rle=df.loc[img_id, "encoding"]
+                )
+                images_dice[img_id] = metrics_val["dice_full"]
+                dice_mean.append(metrics_val["dice_mean"])
+                val_loss.append(metrics_val["loss_val"])
+                dice_pos.append(metrics_val["dice_pos"])
+                dice_neg.append(metrics_val["dice_neg"])
 
-            del val_loader
+                del val_loader
 
-        image_dice_mean = np.mean(list(images_dice.values()))
-        dice_mean = np.mean(dice_mean)
-        val_loss = np.mean(val_loss)
-        dice_pos = np.mean(dice_pos)
-        dice_neg = np.mean(dice_neg)
+            image_dice_mean = np.mean(list(images_dice.values()))
+            dice_mean = np.mean(dice_mean)
+            val_loss = np.mean(val_loss)
+            dice_pos = np.mean(dice_pos)
+            dice_neg = np.mean(dice_neg)
 
-        log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
-        log += f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
+        # log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
+        log = f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
         log += f"dice_neg: {dice_neg:.4f}; dice_pos: {dice_pos:.4f}"
         print(log, end="")
-        cp_handler.update(e, dice_pos)
+        # cp_handler.update(e, dice_pos)
         scheduler.step(dice_pos)
         print("")
+        break
 
 
 if __name__ == "__main__":

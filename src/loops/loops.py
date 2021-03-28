@@ -12,10 +12,10 @@ def train(data_loader, model, optimizer, loss_fn, scaler):
     model.cuda()
     model.train()
     train_loss = []
-    for image, mask in tqdm(data_loader, ncols=70, leave=False):
+    for batch in tqdm(data_loader, ncols=70, leave=False):
         optimizer.zero_grad()
-        image = image.cuda()
-        mask = mask.cuda()
+        image = batch["image"].cuda()
+        mask = batch["mask"].cuda()
         with autocast():
             pred = model(image)
             loss = loss_fn(pred, mask)
@@ -31,16 +31,22 @@ def train(data_loader, model, optimizer, loss_fn, scaler):
 def validation(data_loader, model, loss_fn):
     model.eval()
     val_loss = []
-    dice_metric = []
-    for image, mask, _ in tqdm(data_loader, ncols=70, leave=False):
+    dice_per_crop = []
+    non_empty_indexes = []
+    for batch in tqdm(data_loader, ncols=70, leave=False):
         with torch.no_grad():
-            image = image.cuda()
-            mask = mask.cuda()
+            image = batch["image"].cuda()
+            mask = batch["mask"].cuda()
             pred = model(image)
             val_loss.append(loss_fn(pred, mask).item())
-            dice_metric.append(dice_torch_batch(pred, mask))
+            dice_per_crop.append(dice_torch_batch(pred, mask, reduction="numpy"))
+            non_empty_indexes.append((mask.sum(dim=(1, 2, 3)) > 0).cpu().data.numpy())
+    non_empty_indexes = np.concatenate(non_empty_indexes)
+    dice_per_crop = np.concatenate(dice_per_crop)
     metrics = {}
-    metrics["dice"] = np.array(dice_metric).mean()
+    metrics["dice_mean"] = np.array(dice_per_crop).mean()
+    metrics["dice_pos"] = dice_per_crop[non_empty_indexes].mean()
+    metrics["dice_neg"] = dice_per_crop[~non_empty_indexes].mean()
     metrics["loss_val"] = np.mean(val_loss)
     return metrics
 
@@ -58,10 +64,11 @@ def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
         (data_loader.dataset.h, data_loader.dataset.w), dtype=np.float16
     )
     non_empty_indexes = []
-    for image, mask, crop_names in tqdm(data_loader, ncols=70, leave=False):
+    for batch in tqdm(data_loader, ncols=70, leave=False):
         with torch.no_grad():
-            image = image.cuda()
-            mask = mask.cuda()
+            image = batch["image"].cuda()
+            mask = batch["mask"].cuda()
+            crop_names = batch["file_name"]
             pred = model(image)
             val_loss.append(loss_fn(pred, mask).item())
             pred = pred.sigmoid().squeeze()
@@ -115,6 +122,11 @@ def inference(data_loader, model, crop_size, train_img_size):
                     predict_single = cv2.resize(
                         predict_single.astype(np.float32), (crop_size, crop_size)
                     ).astype(np.float16)
+
+                # predict_single[:10, :] = 1
+                # predict_single[-10:, :] = 1
+                # predict_single[:, :10] = 1
+                # predict_single[:, -10:] = 1
                 mask_pred[y : y + crop_size, x : x + crop_size] = predict_single
 
     return mask_pred
