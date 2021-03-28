@@ -106,6 +106,7 @@ class ZarrValidDataset(Dataset):
         self.step = step
         self.tiff_id = tiff_id
         self.h, self.w = IMG_SIZES_X4[tiff_id]
+        self.h_orig, self.w_orig = IMG_SIZES[tiff_id]
         self.row_count = 1 + math.ceil((self.h - self.crop_size) / self.step)
         self.col_count = 1 + math.ceil((self.w - self.crop_size) / self.step)
         self.img_path = img_path

@@ -45,17 +45,19 @@ def validation(data_loader, model, loss_fn):
     return metrics
 
 
-def validation_full_image(data_loader, model, loss_fn, rle):
+def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
     crop_size = data_loader.dataset.crop_size
-    img_id = data_loader.dataset.tiff_id
-    h, w = IMG_SIZES[img_id]
+    h, w = data_loader.dataset.h_orig, data_loader.dataset.w_orig
     model.eval()
     val_loss = []
     dice_metric = []
     dice_per_crop = []
     mask_true = rle2mask(rle, (w, h))
     mask_true = cv2.resize(mask_true, (data_loader.dataset.w, data_loader.dataset.h))
-    mask_pred = np.zeros((data_loader.dataset.h, data_loader.dataset.w), dtype=np.float16)
+    mask_pred = np.zeros(
+        (data_loader.dataset.h, data_loader.dataset.w), dtype=np.float16
+    )
+    non_empty_indexes = []
     for image, mask, crop_names in tqdm(data_loader, ncols=70, leave=False):
         with torch.no_grad():
             image = image.cuda()
@@ -68,20 +70,28 @@ def validation_full_image(data_loader, model, loss_fn, rle):
             dice_metric.append(dice_torch_batch(pred, mask, reduction="mean"))
             dice_per_crop.append(dice_torch_batch(pred, mask, reduction="numpy"))
             pred = pred.cpu().data.numpy().astype(np.float16)
+            non_empty_indexes.append((mask.sum(dim=(1, 2, 3)) > 0).cpu().data.numpy())
             for predict_single, crop_name in zip(pred, crop_names):
                 x = int(crop_name.split("_")[-2])
                 y = int(crop_name.split("_")[-1])
                 mask_pred[y : y + crop_size, x : x + crop_size] = predict_single
     metrics = {}
     dice_per_crop = np.concatenate(dice_per_crop)
+    non_empty_indexes = np.concatenate(non_empty_indexes)
+
     # df_val = data_loader.dataset.df
     # non_empty_mask = df_val["glomerulus_pix"] > 0
     # empty_mask = df_val["glomerulus_pix"] == 0
-    # metrics["dice_pos"] = dice_per_crop[non_empty_mask].mean()
-    # metrics["dice_neg"] = dice_per_crop[empty_mask].mean()
+    metrics["dice_pos"] = dice_per_crop[non_empty_indexes].mean()
+    metrics["dice_neg"] = dice_per_crop[~non_empty_indexes].mean()
     metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
     metrics["dice_mean"] = np.array(dice_metric).mean()
     metrics["loss_val"] = np.mean(val_loss)
+    if return_mask is True:
+        del mask_true
+        mask_pred = mask_pred.astype(np.float32)
+        mask_pred = cv2.resize(mask_pred, (w, h))
+        return metrics, mask_pred
     return metrics
 
 

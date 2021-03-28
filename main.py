@@ -94,8 +94,8 @@ def main(args):
         images_dice = {}
         dice_mean = []
         val_loss = []
+        dice_pos, dice_neg = [], []
         for img_id in val_img_ids:
-
             val_loader = get_loader(
                 ZarrValidDataset(
                     img_id,
@@ -111,16 +111,23 @@ def main(args):
             images_dice[img_id] = metrics_val["dice_full"]
             dice_mean.append(metrics_val["dice_mean"])
             val_loss.append(metrics_val["loss_val"])
+            dice_pos.append(metrics_val["dice_pos"])
+            dice_neg.append(metrics_val["dice_neg"])
+
             del val_loader
 
         image_dice_mean = np.mean(list(images_dice.values()))
         dice_mean = np.mean(dice_mean)
         val_loss = np.mean(val_loss)
+        dice_pos = np.mean(dice_pos)
+        dice_neg = np.mean(dice_neg)
+
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
         log += f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
+        log += f"dice_neg: {dice_neg:.4f}; dice_pos: {dice_pos:.4f}"
         print(log, end="")
-        cp_handler.update(e, image_dice_mean)
-        scheduler.step(image_dice_mean)
+        cp_handler.update(e, dice_pos)
+        scheduler.step(dice_pos)
         print("")
 
 
