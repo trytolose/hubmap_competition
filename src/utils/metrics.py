@@ -21,7 +21,9 @@ def dice_torch_batch(y_pred, true, threshold=0.5, reduction="mean"):
 def dice_numpy(y_pred, true, threshold=0.5):
     p = (y_pred.reshape(-1,) > threshold).astype(np.uint8)
     t = true.reshape(-1,)
-    if p.sum() == 0 and t.sum() == 0:
+    t_sum = t.sum()
+    p_sum = p.sum()
+    if t_sum == 0 and p_sum == 0:
         return 1
-    dice = (2 * (p * t).sum()) / (p.sum() + t.sum() + 1e-4)
+    dice = (2 * (p * t).sum()) / (p_sum + t_sum + 1e-4)
     return dice

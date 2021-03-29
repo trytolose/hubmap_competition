@@ -24,6 +24,7 @@ from src.transforms.transform import (
 from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES
 import argparse
+from pytorch_toolbelt.losses import DiceLoss
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
@@ -103,7 +104,8 @@ def main(args):
     #     # torch.load("../submission/fold_0_4096to1024_epoch_49_score_0.9339.pth")
     #     torch.load("weights/crop_4096_1024_old_loader/fold_0/epoch_38_score_0.9254.pth")
     # )
-    loss_fn = nn.BCEWithLogitsLoss()
+    # loss_fn = nn.BCEWithLogitsLoss()
+    loss_fn = DiceLoss(mode="binary")
     optimizer = Adam(model.parameters(), lr=START_LR)
     scaler = GradScaler()
     scheduler = ReduceLROnPlateau(
@@ -140,10 +142,10 @@ def main(args):
                     val_loader, model, loss_fn, rle=df.loc[img_id, "encoding"]
                 )
                 images_dice[img_id] = metrics_val["dice_full"]
-                print(
-                    f'{np.mean(metrics_val["dice_mean"]):.4f} {metrics_val["dice_full"]:.4f} '
-                    + f'{np.mean(metrics_val["loss_mask"]):.4f}'
-                )
+                # print(
+                #     f'{np.mean(metrics_val["dice_mean"]):.4f} {metrics_val["dice_full"]:.4f} '
+                #     + f'{np.mean(metrics_val["loss_mask"]):.4f}'
+                # )
                 dice_mean.extend(metrics_val["dice_mean"])
                 val_loss.append(metrics_val["loss_val"])
                 dice_pos.append(metrics_val["dice_pos"])

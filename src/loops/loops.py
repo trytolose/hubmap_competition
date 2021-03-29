@@ -101,8 +101,8 @@ def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
     metrics["dice_neg"] = 0  # dice_per_crop[~non_empty_indexes].mean()
     metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
     metrics["dice_mean"] = dice_per_crop[non_empty_indexes].tolist()
-    [print(f"{x:.3f}", end=", ") for x in metrics["dice_mean"]]
-    print()
+    # [print(f"{x:.3f}", end=", ") for x in metrics["dice_mean"]]
+    # print()
     val_loss = np.concatenate(val_loss)
     metrics["loss_mask"] = val_loss[non_empty_indexes].mean()
     metrics["loss_val"] = np.mean(val_loss)
