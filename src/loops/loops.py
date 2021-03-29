@@ -67,6 +67,7 @@ def validation_full_image(data_loader, model, loss_fn):
             #     x = int(crop_name.split("_")[-2])
             #     y = int(crop_name.split("_")[-1])
             #     mask_pred[y : y + crop_size, x : x + crop_size] = predict_single
+        del image, mask
     metrics = {}
     dice_per_crop = np.concatenate(dice_per_crop)
     # df_val = data_loader.dataset.df

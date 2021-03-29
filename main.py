@@ -53,7 +53,7 @@ def main(args):
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
     BACKGROUND_WEIGHTS = [0.5, 0.25, 0.01]
-    WEIGHT_PATH = f"./crop_4096_1024/fold_{FOLD}"
+    WEIGHT_PATH = f"./crop_4096_1024_v2/fold_{FOLD}"
 
     # df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train_v1_1024/split_v2.csv")
     # input_path = Path("/hdd/kaggle/hubmap/input_v2/train_v2_2048/images")
