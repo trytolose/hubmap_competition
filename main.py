@@ -34,6 +34,10 @@ FOLD_IMGS = {
 }
 
 
+def worker_init_fn(worker_id):
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
+
+
 def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
     return DataLoader(
         dataset=dataset,
@@ -42,6 +46,7 @@ def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
         num_workers=num_workers,
         pin_memory=False,
         sampler=sampler,
+        worker_init_fn=worker_init_fn,
     )
 
 
@@ -53,12 +58,12 @@ def main(args):
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
-    WEIGHT_PATH = f"./weights/crop_4096_1024_pdf/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/zarr_full_image_val_no_pdf/fold_{FOLD}"
     ITERS = 100
-    IS_OLD_VALIDATION = True
+    IS_OLD_VALIDATION = False
 
     df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
-    input_path = "../input/zarr_train"
+    input_path = "../input/zarr_train_orig"
     pdf_path = "../input/zarr_pdf"
     crop_img_path = Path("../input/train_v3_4096_1024/images")
 
@@ -84,7 +89,8 @@ def main(args):
             img_path=input_path,
             transform=baseline_aug(TRAIN_IMG_SIZE),
             iterations=ITERS * BATCH_SIZE,
-            pdf_path=pdf_path,
+            pdf_path=None,
+            crop_size=CROP_SIZE,
         )
     )
     old_val_loader = get_loader(
@@ -92,21 +98,21 @@ def main(args):
     )
 
     model = smp.Unet("resnet34").cuda()
-    model.load_state_dict(
-        # torch.load("../submission/fold_0_zarr_pdf_epoch_34_score_0.9123.pth")
-        # torch.load("../submission/fold_0_4096to1024_epoch_49_score_0.9339.pth")
-        torch.load("weights/crop_4096_1024_old_loader/fold_0/epoch_38_score_0.9254.pth")
-    )
+    # model.load_state_dict(
+    #     # torch.load("../submission/fold_0_zarr_pdf_epoch_34_score_0.9123.pth")
+    #     # torch.load("../submission/fold_0_4096to1024_epoch_49_score_0.9339.pth")
+    #     torch.load("weights/crop_4096_1024_old_loader/fold_0/epoch_38_score_0.9254.pth")
+    # )
     loss_fn = nn.BCEWithLogitsLoss()
     optimizer = Adam(model.parameters(), lr=START_LR)
     scaler = GradScaler()
     scheduler = ReduceLROnPlateau(
         optimizer, mode="max", factor=0.4, patience=5, verbose=True
     )
-    # cp_handler = CheckpointHandler(model, WEIGHT_PATH, 5)
+    cp_handler = CheckpointHandler(model, WEIGHT_PATH, 5)
 
     for e in range(1, EPOCH + 1):
-        # metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
+        metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
         images_dice = {}
         dice_mean = []
         val_loss = []
@@ -124,16 +130,21 @@ def main(args):
                     ZarrValidDataset(
                         img_id,
                         img_path=input_path,
-                        transform=valid_transform(CROP_SIZE),
+                        transform=valid_transform(TRAIN_IMG_SIZE),
                         crop_size=CROP_SIZE,
                         step=CROP_SIZE,
-                    )
+                    ),
+                    shuffle=False,
                 )
                 metrics_val = validation_full_image(
                     val_loader, model, loss_fn, rle=df.loc[img_id, "encoding"]
                 )
                 images_dice[img_id] = metrics_val["dice_full"]
-                dice_mean.append(metrics_val["dice_mean"])
+                print(
+                    f'{np.mean(metrics_val["dice_mean"]):.4f} {metrics_val["dice_full"]:.4f} '
+                    + f'{np.mean(metrics_val["loss_mask"]):.4f}'
+                )
+                dice_mean.extend(metrics_val["dice_mean"])
                 val_loss.append(metrics_val["loss_val"])
                 dice_pos.append(metrics_val["dice_pos"])
                 dice_neg.append(metrics_val["dice_neg"])
@@ -146,14 +157,13 @@ def main(args):
             dice_pos = np.mean(dice_pos)
             dice_neg = np.mean(dice_neg)
 
-        # log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
-        log = f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
+        log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
+        log += f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
         log += f"dice_neg: {dice_neg:.4f}; dice_pos: {dice_pos:.4f}"
         print(log, end="")
-        # cp_handler.update(e, dice_pos)
-        scheduler.step(dice_pos)
+        cp_handler.update(e, dice_mean)
+        scheduler.step(dice_mean)
         print("")
-        break
 
 
 if __name__ == "__main__":

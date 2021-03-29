@@ -20,9 +20,9 @@ FOLD_IMGS = {
 }
 BATCH_SIZE = 24
 TRAIN_IMG_SIZE = 1024
-CROP_SIZE = 1024
+CROP_SIZE = 1024 * 4
 # input_path = Path("../input/train_v3_4096_1024/images")
-input_path = "../input/zarr_train"
+input_path = "../input/zarr_train_orig"
 
 df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
 
@@ -34,7 +34,7 @@ def get_score(model, fold):
         val_ds = ZarrValidDataset(
             img_id,
             img_path=input_path,
-            transform=valid_transform(CROP_SIZE),
+            transform=valid_transform(TRAIN_IMG_SIZE),
             crop_size=CROP_SIZE,
             step=CROP_SIZE,
         )
@@ -107,7 +107,7 @@ def get_avg_checkpoint(weights_path, fold=0):
 
 
 if __name__ == "__main__":
-    weights_path = "./crop_4096_1024"
+    weights_path = "./weights/zarr_full_image_val"
     for i in range(1):
         print("FOLD:", i)
         get_avg_checkpoint(weights_path, i)

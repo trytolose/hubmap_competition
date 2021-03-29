@@ -59,40 +59,52 @@ def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
     dice_metric = []
     dice_per_crop = []
     mask_true = rle2mask(rle, (w, h))
-    mask_true = cv2.resize(mask_true, (data_loader.dataset.w, data_loader.dataset.h))
+    # mask_true = cv2.resize(mask_true, (data_loader.dataset.w, data_loader.dataset.h))
     mask_pred = np.zeros(
-        (data_loader.dataset.h, data_loader.dataset.w), dtype=np.float16
+        (data_loader.dataset.h, data_loader.dataset.w), dtype=np.float32
     )
     non_empty_indexes = []
+    loss_fn = torch.nn.BCEWithLogitsLoss(reduction="none")
     for batch in tqdm(data_loader, ncols=70, leave=False):
         with torch.no_grad():
             image = batch["image"].cuda()
             mask = batch["mask"].cuda()
+            is_non_empty = batch["is_background"]
             crop_names = batch["file_name"]
             pred = model(image)
-            val_loss.append(loss_fn(pred, mask).item())
+            loss = loss_fn(pred, mask).mean(dim=(1, 2, 3)).cpu().data.numpy()
+            val_loss.append(loss)
+
             pred = pred.sigmoid().squeeze()
             if len(pred.shape) == 2:
                 pred = pred.unsqueeze(0)
-            dice_metric.append(dice_torch_batch(pred, mask, reduction="mean"))
+            # dice_metric.append(dice_torch_batch(pred, mask, reduction="mean"))
             dice_per_crop.append(dice_torch_batch(pred, mask, reduction="numpy"))
-            pred = pred.cpu().data.numpy().astype(np.float16)
-            non_empty_indexes.append((mask.sum(dim=(1, 2, 3)) > 0).cpu().data.numpy())
+            pred = pred.cpu().data.numpy().astype(np.float32)
+            # non_empty_indexes.append((mask.sum(dim=(1, 2, 3)) > 0).cpu().data.numpy())
+            is_non_empty = is_non_empty.data.numpy()
+            non_empty_indexes.append(is_non_empty)
             for predict_single, crop_name in zip(pred, crop_names):
                 x = int(crop_name.split("_")[-2])
                 y = int(crop_name.split("_")[-1])
-                mask_pred[y : y + crop_size, x : x + crop_size] = predict_single
+                mask_pred[y : y + crop_size, x : x + crop_size] = cv2.resize(
+                    predict_single, (crop_size, crop_size)
+                )
     metrics = {}
     dice_per_crop = np.concatenate(dice_per_crop)
     non_empty_indexes = np.concatenate(non_empty_indexes)
-
+    # print(f"{non_empty_indexes.sum()}/{len(dice_per_crop)}")
     # df_val = data_loader.dataset.df
     # non_empty_mask = df_val["glomerulus_pix"] > 0
     # empty_mask = df_val["glomerulus_pix"] == 0
-    metrics["dice_pos"] = dice_per_crop[non_empty_indexes].mean()
-    metrics["dice_neg"] = dice_per_crop[~non_empty_indexes].mean()
+    metrics["dice_pos"] = 0  # dice_per_crop[non_empty_indexes].mean()
+    metrics["dice_neg"] = 0  # dice_per_crop[~non_empty_indexes].mean()
     metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
-    metrics["dice_mean"] = np.array(dice_metric).mean()
+    metrics["dice_mean"] = dice_per_crop[non_empty_indexes].tolist()
+    [print(f"{x:.3f}", end=", ") for x in metrics["dice_mean"]]
+    print()
+    val_loss = np.concatenate(val_loss)
+    metrics["loss_mask"] = val_loss[non_empty_indexes].mean()
     metrics["loss_val"] = np.mean(val_loss)
     if return_mask is True:
         del mask_true

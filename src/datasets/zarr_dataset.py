@@ -69,7 +69,7 @@ class ZarrTrainDataset(Dataset):
 
     def __getitem__(self, idx):
         img_id = np.random.choice(self.img_ids)
-        h, w = IMG_SIZES_X4[img_id]
+        h, w = IMG_SIZES[img_id]
 
         if self.pdf is not None:
             pdf_mask = self.pdf[img_id]
@@ -89,7 +89,10 @@ class ZarrTrainDataset(Dataset):
             y : y + self.crop_size, x : x + self.crop_size
         ]
         transormed = self.transform(image=img, mask=mask)
-        return transormed["image"], transormed["mask"].unsqueeze(0).float()
+        return {
+            "image": transormed["image"],
+            "mask": transormed["mask"].unsqueeze(0).float(),
+        }
 
     def _get_corner(self, pdf):
         probs = softmax(pdf).reshape(-1,)
@@ -105,7 +108,7 @@ class ZarrValidDataset(Dataset):
         self.transform = transform
         self.step = step
         self.tiff_id = tiff_id
-        self.h, self.w = IMG_SIZES_X4[tiff_id]
+        self.h, self.w = IMG_SIZES[tiff_id]
         self.h_orig, self.w_orig = IMG_SIZES[tiff_id]
         self.row_count = 1 + math.ceil((self.h - self.crop_size) / self.step)
         self.col_count = 1 + math.ceil((self.w - self.crop_size) / self.step)
@@ -127,10 +130,18 @@ class ZarrValidDataset(Dataset):
         crop_mask = self.zarr[self.tiff_id + "_mask"][
             y : y + self.crop_size, x : x + self.crop_size
         ]
+        s_th = 40  # saturation blancking threshold
+        p_th = (
+            1000 * (self.crop_size // 256) ** 2
+        )  # threshold for the minimum number of pixels
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        _, ss, _ = cv2.split(hsv)
 
+        background = False if (ss > s_th).sum() <= p_th or img.sum() <= p_th else True
         transormed = self.transform(image=img, mask=crop_mask)
-        return (
-            transormed["image"],
-            transormed["mask"].unsqueeze(0).float(),
-            f"{x}_{y}",
-        )
+        return {
+            "image": transormed["image"],
+            "mask": transormed["mask"].unsqueeze(0).float(),
+            "file_name": f"{x}_{y}",
+            "is_background": background,
+        }
