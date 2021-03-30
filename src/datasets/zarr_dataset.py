@@ -51,7 +51,7 @@ class ZarrTrainDataset(Dataset):
         transform,
         iterations=1000,
         crop_size=1024,
-        pdf_path=None,
+        pdf_path=False,
     ):
         self.crop_size = crop_size
         self.transform = transform
@@ -61,8 +61,8 @@ class ZarrTrainDataset(Dataset):
         self.zarr = zarr.open(self.img_path, mode="r")
         self.pdf = None
         self.coord = np.arange(512 ** 2)
-        if pdf_path is not None:
-            self.pdf = zarr.open(pdf_path, mode="r")
+        if pdf_path is True:
+            self.pdf = zarr.open("../input/zarr_pdf", mode="r")
 
     def __len__(self):
         return self.iterations
@@ -71,7 +71,7 @@ class ZarrTrainDataset(Dataset):
         img_id = np.random.choice(self.img_ids)
         h, w = IMG_SIZES[img_id]
 
-        if self.pdf is not None:
+        if self.pdf is True:
             pdf_mask = self.pdf[img_id]
             x, y = self._get_corner(pdf_mask)
             scale_x, scale_y = w / 512, h / 512
@@ -85,10 +85,10 @@ class ZarrTrainDataset(Dataset):
             x = np.random.randint(0, w - self.crop_size)
             y = np.random.randint(0, h - self.crop_size)
             img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
-            while not _check_background(img, self.crop_size):
-                x = np.random.randint(0, w - self.crop_size)
-                y = np.random.randint(0, h - self.crop_size)
-                img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
+            # while not _check_background(img, self.crop_size):
+            #     x = np.random.randint(0, w - self.crop_size)
+            #     y = np.random.randint(0, h - self.crop_size)
+            #     img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
             # print(f"x: {x} y: {y} count: {count}")
 
         mask = self.zarr[img_id + "_mask"][

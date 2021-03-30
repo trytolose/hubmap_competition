@@ -28,7 +28,11 @@ from pytorch_toolbelt.losses import DiceLoss
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
-    1: ["c68fe75ea", "095bf7a1f", "aaa6a05cc"],
+    1: [
+        "c68fe75ea",
+        "095bf7a1f",
+        #  "aaa6a05cc"
+    ],
     2: ["afa5e8098", "1e2425f28", "b2dc8411c"],
     3: ["cb2d976f4", "8242609fa", "54f2eec69"],
     4: ["26dc41664", "b9a3865fc", "e79de561c"],
@@ -59,13 +63,15 @@ def main(args):
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
-    WEIGHT_PATH = f"./weights/zarr_full_image_while/fold_{FOLD}"
-    ITERS = 100
+    WEIGHT_PATH = f"{args.w_path}/fold_{FOLD}"
+    ITERS = args.iter
     IS_OLD_VALIDATION = False
+    USE_PDF = args.use_pdf
+
+    print(args)
 
     df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
     input_path = "../input/zarr_train_orig"
-    pdf_path = "../input/zarr_pdf"
     crop_img_path = Path("../input/train_v3_4096_1024/images")
 
     train_img_ids = [
@@ -90,7 +96,7 @@ def main(args):
             img_path=input_path,
             transform=baseline_aug(TRAIN_IMG_SIZE),
             iterations=ITERS * BATCH_SIZE,
-            pdf_path=None,
+            pdf_path=USE_PDF,
             crop_size=CROP_SIZE,
         )
     )
@@ -163,8 +169,8 @@ def main(args):
         log += f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
         log += f"dice_neg: {dice_neg:.4f}; dice_pos: {dice_pos:.4f}"
         print(log, end="")
-        cp_handler.update(e, dice_mean)
-        scheduler.step(dice_mean)
+        cp_handler.update(e, image_dice_mean)
+        scheduler.step(image_dice_mean)
         print("")
 
 
@@ -177,6 +183,9 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=24, help="batch size")
     parser.add_argument("--crop_size", type=int, default=1024, help="batch size")
     parser.add_argument("--train_img_size", type=int, default=1024, help="batch size")
+    parser.add_argument("--w_path", type=str, default="./test", help="batch size")
+    parser.add_argument("--use_pdf", type=bool, default=False, help="batch size")
+    parser.add_argument("--iter", type=int, default=100, help="total epochs")
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
