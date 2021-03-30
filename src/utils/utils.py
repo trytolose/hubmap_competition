@@ -103,9 +103,12 @@ def create_dataset(
     rle: str,
     crop_size: int,
     folder_to_save,
+    step=None,
     resize=None,
     path="/hdd/kaggle/hubmap/input_v2/train/",
 ) -> np.ndarray:
+    if step is None:
+        step = crop_size
     s_th = 40  # saturation blancking threshold
     p_th = 1000 * (crop_size // 256) ** 2  # threshold for the minimum number of pixels
 
@@ -130,10 +133,10 @@ def create_dataset(
     masks_path.mkdir(parents=True, exist_ok=True)
 
     meta_info = []
-    for x in range(0, w, crop_size):
+    for x in range(0, w, step):
         if x + crop_size > w:
             x = w - crop_size
-        for y in range(0, h, crop_size):
+        for y in range(0, h, step):
             if y + crop_size > h:
                 y = h - crop_size
             window = Window(x, y, crop_size, crop_size)

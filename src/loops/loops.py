@@ -24,6 +24,7 @@ def train(data_loader, model, optimizer, loss_fn, scaler):
         train_loss.append(loss.item())
     metrics = {}
     metrics["loss_train"] = np.mean(train_loss)
+    del image, mask
     return metrics
 
 
@@ -38,6 +39,7 @@ def validation(data_loader, model, loss_fn):
             pred = model(image)
             val_loss.append(loss_fn(pred, mask).item())
             dice_metric.append(dice_torch_batch(pred, mask))
+    del image, mask
     metrics = {}
     metrics["dice"] = np.array(dice_metric).mean()
     metrics["loss_val"] = np.mean(val_loss)

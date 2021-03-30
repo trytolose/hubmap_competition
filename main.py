@@ -53,9 +53,11 @@ def main(args):
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
     BACKGROUND_WEIGHTS = [0.5, 0.25, 0.01]
-    WEIGHT_PATH = f"./crop_4096_1024_v2/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/crop_4096_1024_weighted/fold_{FOLD}"
 
-    # df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train_v1_1024/split_v2.csv")
+    df = pd.read_csv("../input/train_v3_4096_1024/split_v1.csv")
+    df = df[df["img_id"] != "aaa6a05cc"].reset_index(drop=True)
+
     # input_path = Path("/hdd/kaggle/hubmap/input_v2/train_v2_2048/images")
     input_path = Path("../input/train_v3_4096_1024/images")
 
@@ -70,16 +72,17 @@ def main(args):
         if img.stem.split("_")[0] in FOLD_IMGS[FOLD]
     ]
 
-    # df["file"] = df["file"].apply(lambda x: str(input_path / Path(x).name))
-
-    # df_train = df[df["fold"] != FOLD].reset_index(drop=True)
-    # df_valid = df[df["fold"] == FOLD].reset_index(drop=True)
+    df["file"] = df["file"].apply(lambda x: str(input_path / Path(x).name))
+    df_train = df[df["fold"] != FOLD].reset_index(drop=True)
+    df_valid = df[df["fold"] == FOLD].reset_index(drop=True)
     print(f"FOLD: {FOLD}")
 
-    # df_train["back_prob"] = -1
-    # counts = df_train["back_class"].value_counts()
-    # df_train.loc[df_train["back_class"] == 0, "back_prob"] = (
-    #     1 / counts[0]
+    df_train["back_prob"] = -1
+    counts = df_train["glomerulus_pix"].value_counts()
+    zero_gl = counts[0]
+    non_zero_gl = len(df_train) - zero_gl
+    df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = 1 / zero_gl
+    df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = 1 / non_zero_gl
     # ) * BACKGROUND_WEIGHTS[2]
     # df_train.loc[df_train["back_class"] == 1, "back_prob"] = (
     #     1 / counts[1]
@@ -88,16 +91,18 @@ def main(args):
     #     1 / counts[2]
     # ) * BACKGROUND_WEIGHTS[1]
 
-    # sampler = WeightedRandomSampler(df_train["back_prob"].values, len(df_train))
+    sampler = WeightedRandomSampler(df_train["back_prob"].values, len(df_train))
 
     get_loader = partial(
         _get_loader, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=True,
     )
     train_loader = get_loader(
-        ImageDatasetV2(train_img_paths, baseline_aug(TRAIN_IMG_SIZE)), sampler=None,
+        ImageDataset(df_train, baseline_aug(TRAIN_IMG_SIZE)),
+        sampler=None,  # sampler,
+        shuffle=True,  # False,
     )
     val_loader = get_loader(
-        ImageDatasetV2(val_img_paths, valid_transform(TRAIN_IMG_SIZE)), shuffle=False,
+        ImageDataset(df_valid, valid_transform(TRAIN_IMG_SIZE)), shuffle=False,
     )
 
     model = smp.Unet("resnet34").cuda()
