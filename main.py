@@ -59,7 +59,7 @@ def main(args):
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
-    WEIGHT_PATH = f"./weights/zarr_full_image_val_no_pdf/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/zarr_full_image_while/fold_{FOLD}"
     ITERS = 100
     IS_OLD_VALIDATION = False
 
@@ -104,8 +104,8 @@ def main(args):
     #     # torch.load("../submission/fold_0_4096to1024_epoch_49_score_0.9339.pth")
     #     torch.load("weights/crop_4096_1024_old_loader/fold_0/epoch_38_score_0.9254.pth")
     # )
-    # loss_fn = nn.BCEWithLogitsLoss()
-    loss_fn = DiceLoss(mode="binary")
+    loss_fn = nn.BCEWithLogitsLoss()
+    # loss_fn = DiceLoss(mode="binary")
     optimizer = Adam(model.parameters(), lr=START_LR)
     scaler = GradScaler()
     scheduler = ReduceLROnPlateau(

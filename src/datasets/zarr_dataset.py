@@ -84,7 +84,13 @@ class ZarrTrainDataset(Dataset):
         else:
             x = np.random.randint(0, w - self.crop_size)
             y = np.random.randint(0, h - self.crop_size)
-        img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
+            img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
+            while not _check_background(img, self.crop_size):
+                x = np.random.randint(0, w - self.crop_size)
+                y = np.random.randint(0, h - self.crop_size)
+                img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
+            # print(f"x: {x} y: {y} count: {count}")
+
         mask = self.zarr[img_id + "_mask"][
             y : y + self.crop_size, x : x + self.crop_size
         ]
@@ -130,14 +136,7 @@ class ZarrValidDataset(Dataset):
         crop_mask = self.zarr[self.tiff_id + "_mask"][
             y : y + self.crop_size, x : x + self.crop_size
         ]
-        s_th = 40  # saturation blancking threshold
-        p_th = (
-            1000 * (self.crop_size // 256) ** 2
-        )  # threshold for the minimum number of pixels
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        _, ss, _ = cv2.split(hsv)
-
-        background = False if (ss > s_th).sum() <= p_th or img.sum() <= p_th else True
+        background = _check_background(img, self.crop_size)
         transormed = self.transform(image=img, mask=crop_mask)
         return {
             "image": transormed["image"],
@@ -145,3 +144,12 @@ class ZarrValidDataset(Dataset):
             "file_name": f"{x}_{y}",
             "is_background": background,
         }
+
+
+def _check_background(img, crop_size) -> bool:
+    s_th = 40  # saturation blancking threshold
+    p_th = 1000 * (crop_size // 256) ** 2  # threshold for the minimum number of pixels
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    _, ss, _ = cv2.split(hsv)
+    background = False if (ss > s_th).sum() <= p_th or img.sum() <= p_th else True
+    return background
