@@ -51,7 +51,9 @@ def validation(data_loader, model, loss_fn):
     return metrics
 
 
-def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
+def validation_full_image(
+    data_loader, model, loss_fn, rle, return_mask=False, calc_dice_full=False
+):
     crop_size = data_loader.dataset.crop_size
     h, w = data_loader.dataset.h_orig, data_loader.dataset.w_orig
     model.eval()
@@ -60,9 +62,10 @@ def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
     dice_per_crop = []
     mask_true = rle2mask(rle, (w, h))
     # mask_true = cv2.resize(mask_true, (data_loader.dataset.w, data_loader.dataset.h))
-    mask_pred = np.zeros(
-        (data_loader.dataset.h, data_loader.dataset.w), dtype=np.float32
-    )
+    if calc_dice_full:
+        mask_pred = np.zeros(
+            (data_loader.dataset.h, data_loader.dataset.w), dtype=np.float32
+        )
     non_empty_indexes = []
     loss_fn = torch.nn.BCEWithLogitsLoss(reduction="none")
     for batch in tqdm(data_loader, ncols=70, leave=False):
@@ -84,12 +87,13 @@ def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
             # non_empty_indexes.append((mask.sum(dim=(1, 2, 3)) > 0).cpu().data.numpy())
             is_non_empty = is_non_empty.data.numpy()
             non_empty_indexes.append(is_non_empty)
-            for predict_single, crop_name in zip(pred, crop_names):
-                x = int(crop_name.split("_")[-2])
-                y = int(crop_name.split("_")[-1])
-                mask_pred[y : y + crop_size, x : x + crop_size] = cv2.resize(
-                    predict_single, (crop_size, crop_size)
-                )
+            if calc_dice_full:
+                for predict_single, crop_name in zip(pred, crop_names):
+                    x = int(crop_name.split("_")[-2])
+                    y = int(crop_name.split("_")[-1])
+                    mask_pred[y : y + crop_size, x : x + crop_size] = cv2.resize(
+                        predict_single, (crop_size, crop_size)
+                    )
     metrics = {}
     dice_per_crop = np.concatenate(dice_per_crop)
     non_empty_indexes = np.concatenate(non_empty_indexes)
@@ -99,7 +103,10 @@ def validation_full_image(data_loader, model, loss_fn, rle, return_mask=False):
     # empty_mask = df_val["glomerulus_pix"] == 0
     metrics["dice_pos"] = 0  # dice_per_crop[non_empty_indexes].mean()
     metrics["dice_neg"] = 0  # dice_per_crop[~non_empty_indexes].mean()
-    metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
+    if calc_dice_full:
+        metrics["dice_full"] = dice_numpy(mask_pred, mask_true)
+    else:
+        metrics["dice_full"] = 0
     metrics["dice_mean"] = dice_per_crop[non_empty_indexes].tolist()
     # [print(f"{x:.3f}", end=", ") for x in metrics["dice_mean"]]
     # print()

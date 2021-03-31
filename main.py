@@ -20,6 +20,7 @@ from src.transforms.transform import (
     valid_transform,
     baseline_aug,
     baseline_aug_v2,
+    public_hard_aug,
 )
 from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES
@@ -28,11 +29,7 @@ from pytorch_toolbelt.losses import DiceLoss
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
-    1: [
-        "c68fe75ea",
-        "095bf7a1f",
-        #  "aaa6a05cc"
-    ],
+    1: ["c68fe75ea", "095bf7a1f", "aaa6a05cc",],
     2: ["afa5e8098", "1e2425f28", "b2dc8411c"],
     3: ["cb2d976f4", "8242609fa", "54f2eec69"],
     4: ["26dc41664", "b9a3865fc", "e79de561c"],
@@ -59,11 +56,11 @@ def main(args):
     FOLD = int(args.fold)
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = 10
-    START_LR = 0.001
+    START_LR = args.start_lr
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
-    WEIGHT_PATH = f"{args.w_path}/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/{args.w_path}_{args.encoder}/fold_{FOLD}"
     ITERS = args.iter
     IS_OLD_VALIDATION = False
     USE_PDF = args.use_pdf
@@ -94,7 +91,7 @@ def main(args):
         ZarrTrainDataset(
             img_ids=train_img_ids,
             img_path=input_path,
-            transform=baseline_aug(TRAIN_IMG_SIZE),
+            transform=public_hard_aug(TRAIN_IMG_SIZE),
             iterations=ITERS * BATCH_SIZE,
             pdf_path=USE_PDF,
             crop_size=CROP_SIZE,
@@ -104,7 +101,7 @@ def main(args):
         ImageDatasetV2(val_img_paths, valid_transform(TRAIN_IMG_SIZE)), shuffle=False,
     )
 
-    model = smp.Unet("resnet34").cuda()
+    model = smp.Unet(args.encoder, encoder_weights="imagenet").cuda()
     # model.load_state_dict(
     #     # torch.load("../submission/fold_0_zarr_pdf_epoch_34_score_0.9123.pth")
     #     # torch.load("../submission/fold_0_4096to1024_epoch_49_score_0.9339.pth")
@@ -166,11 +163,12 @@ def main(args):
             dice_neg = np.mean(dice_neg)
 
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
-        log += f"avg_dice: {dice_mean:.4f}; full_mask_dice: {image_dice_mean:.4f} "
-        log += f"dice_neg: {dice_neg:.4f}; dice_pos: {dice_pos:.4f}"
+        log += f"avg_dice: {dice_mean:.4f}; "
+        # log += f"full_mask_dice: {image_dice_mean:.4f}; "
+        # log += f"dice_neg: {dice_neg:.4f}; dice_pos: {dice_pos:.4f}"
         print(log, end="")
-        cp_handler.update(e, image_dice_mean)
-        scheduler.step(image_dice_mean)
+        cp_handler.update(e, dice_mean)
+        scheduler.step(dice_mean)
         print("")
 
 
@@ -186,6 +184,8 @@ if __name__ == "__main__":
     parser.add_argument("--w_path", type=str, default="./test", help="batch size")
     parser.add_argument("--use_pdf", type=bool, default=False, help="batch size")
     parser.add_argument("--iter", type=int, default=100, help="total epochs")
+    parser.add_argument("--start_lr", type=float, default=0.001, help="total epochs")
+    parser.add_argument("--encoder", type=str, default="resnet34", help="total epochs")
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
