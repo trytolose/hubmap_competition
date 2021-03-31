@@ -7,7 +7,7 @@ from tqdm import tqdm
 if __name__ == "__main__":
 
     INPUT_PATH = Path("/hdd/kaggle/hubmap/input_v2")
-    PATH_FOR_CROPS = "../input/train_v4_4096_1024"
+    PATH_FOR_CROPS = "/home/trytolose/rinat/kaggle/hubmap/input/train_1024_256"
     df_train = pd.read_csv(INPUT_PATH / "train.csv")
     train_info = pd.read_csv(INPUT_PATH / "HuBMAP-20-dataset_information.csv")
     train_tiffs = list((INPUT_PATH / "train").glob("*.tiff"))
@@ -15,7 +15,7 @@ if __name__ == "__main__":
     meta_data = []
     for _, row in tqdm(df_train.iterrows(), total=len(df_train)):
         meta = create_dataset(
-            row["id"], row["encoding"], 4096, PATH_FOR_CROPS, resize=1024, step=2048,
+            row["id"], row["encoding"], 1024, PATH_FOR_CROPS, resize=256, step=1024,
         )
         meta_data.extend(meta)
 

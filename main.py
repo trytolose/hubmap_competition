@@ -19,10 +19,13 @@ from src.transforms.transform import (
     valid_transform,
     baseline_aug,
     baseline_aug_v2,
+    public_augs,
+    vitaly_augs,
 )
 from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES
 import argparse
+from madgrad import MADGRAD
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
@@ -48,18 +51,19 @@ def main(args):
     FOLD = args.fold
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = 10
-    START_LR = 0.001
+    START_LR = 0.0005
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
     BACKGROUND_WEIGHTS = [0.5, 0.25, 0.01]
-    WEIGHT_PATH = f"./weights/crop_4096_1024_weighted/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/crop_512_weighted_new/fold_{FOLD}"
 
-    df = pd.read_csv("../input/train_v3_4096_1024/split_v1.csv")
-    df = df[df["img_id"] != "aaa6a05cc"].reset_index(drop=True)
+    df = pd.read_csv("../input/train_1024_256/split_v1.csv")
 
+    # df = df[df["img_id"] != "aaa6a05cc"].reset_index(drop=True)
     # input_path = Path("/hdd/kaggle/hubmap/input_v2/train_v2_2048/images")
-    input_path = Path("../input/train_v3_4096_1024/images")
+    # input_path = Path("../input/train_v3_4096_1024/images")
+    input_path = Path("../input/train_1024_256")
 
     train_img_paths = [
         str(img)
@@ -72,7 +76,7 @@ def main(args):
         if img.stem.split("_")[0] in FOLD_IMGS[FOLD]
     ]
 
-    df["file"] = df["file"].apply(lambda x: str(input_path / Path(x).name))
+    # df["file"] = df["file"].apply(lambda x: str(input_path / "images" / Path(x).name))
     df_train = df[df["fold"] != FOLD].reset_index(drop=True)
     df_valid = df[df["fold"] == FOLD].reset_index(drop=True)
     print(f"FOLD: {FOLD}")
@@ -81,8 +85,8 @@ def main(args):
     counts = df_train["glomerulus_pix"].value_counts()
     zero_gl = counts[0]
     non_zero_gl = len(df_train) - zero_gl
-    df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = 1 / zero_gl
-    df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = 1 / non_zero_gl
+    df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (1 / zero_gl) * 20
+    df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (1 / non_zero_gl) * 80
     # ) * BACKGROUND_WEIGHTS[2]
     # df_train.loc[df_train["back_class"] == 1, "back_prob"] = (
     #     1 / counts[1]
@@ -97,9 +101,9 @@ def main(args):
         _get_loader, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=True,
     )
     train_loader = get_loader(
-        ImageDataset(df_train, baseline_aug(TRAIN_IMG_SIZE)),
-        sampler=None,  # sampler,
-        shuffle=True,  # False,
+        ImageDataset(df_train, public_augs(TRAIN_IMG_SIZE)),
+        sampler=sampler,
+        shuffle=False,
     )
     val_loader = get_loader(
         ImageDataset(df_valid, valid_transform(TRAIN_IMG_SIZE)), shuffle=False,
