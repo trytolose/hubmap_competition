@@ -18,7 +18,6 @@ def baseline_aug(img_size):
     return A.Compose(
         [
             A.Resize(img_size, img_size),
-            # A.ShiftScaleRotate(shift_limit_x=300, shift_limit_y=300, rotate_limit=90),
             A.VerticalFlip(),
             A.HorizontalFlip(),
             A.RGBShift(),
