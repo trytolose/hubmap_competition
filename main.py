@@ -26,6 +26,7 @@ from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES
 import argparse
 from madgrad import MADGRAD
+from pytorch_toolbelt.losses import DiceLoss
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
@@ -47,46 +48,62 @@ def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
     )
 
 
+from torch.nn.modules.loss import _Loss
+
+
+class MyLoss(_Loss):
+    """Wrapper class around loss function that applies weighted with fixed factor.
+    This class helps to balance multiple losses if they have different scales
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        self.dice_loss = DiceLoss(mode="binary", log_loss=True)
+
+    def forward(self, *input):
+        return self.bce_loss(*input) + self.dice_loss(*input)
+
+
 def main(args):
     FOLD = args.fold
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = 10
-    START_LR = 0.0005
+    START_LR = 0.001
     EPOCH = args.epoch
     CROP_SIZE = args.crop_size
     TRAIN_IMG_SIZE = args.train_img_size
     BACKGROUND_WEIGHTS = [0.5, 0.25, 0.01]
-    WEIGHT_PATH = f"./weights/crop_512_weighted_new/fold_{FOLD}"
+    WEIGHT_PATH = f"./weights/1024_weighted/fold_{FOLD}"
 
-    df = pd.read_csv("../input/train_1024_256/split_v1.csv")
+    # df = pd.read_csv("../input/train_1024_256/split_v1.csv")
+    df = pd.read_csv("../input/train_v1_1024/split_v2.csv")
+
+    df_pseudo = pd.read_csv(
+        "/home/trytolose/rinat/kaggle/hubmap/input/train_1024_256_pseudo_v1/meta.csv"
+    )
 
     # df = df[df["img_id"] != "aaa6a05cc"].reset_index(drop=True)
     # input_path = Path("/hdd/kaggle/hubmap/input_v2/train_v2_2048/images")
     # input_path = Path("../input/train_v3_4096_1024/images")
-    input_path = Path("../input/train_1024_256")
+    input_path = Path("../input/train_v1_1024")
 
-    train_img_paths = [
-        str(img)
-        for img in Path(input_path).glob("*.png")
-        if img.stem.split("_")[0] not in FOLD_IMGS[FOLD]
-    ]
-    val_img_paths = [
-        str(img)
-        for img in Path(input_path).glob("*.png")
-        if img.stem.split("_")[0] in FOLD_IMGS[FOLD]
-    ]
+    df["fold"] = -1
+    for fold_idx, img_ids in FOLD_IMGS.items():
+        df.loc[df["img_id"].isin(img_ids), "fold"] = fold_idx
 
-    # df["file"] = df["file"].apply(lambda x: str(input_path / "images" / Path(x).name))
+    df["file"] = df["file"].apply(lambda x: str(input_path / "images" / Path(x).name))
     df_train = df[df["fold"] != FOLD].reset_index(drop=True)
     df_valid = df[df["fold"] == FOLD].reset_index(drop=True)
     print(f"FOLD: {FOLD}")
 
+    # df_train = pd.concat([df_train, df_pseudo], axis=0, ignore_index=True)
     df_train["back_prob"] = -1
     counts = df_train["glomerulus_pix"].value_counts()
     zero_gl = counts[0]
     non_zero_gl = len(df_train) - zero_gl
-    df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (1 / zero_gl) * 20
-    df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (1 / non_zero_gl) * 80
+    df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (1 / zero_gl) * 40
+    df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (1 / non_zero_gl) * 60
     # ) * BACKGROUND_WEIGHTS[2]
     # df_train.loc[df_train["back_class"] == 1, "back_prob"] = (
     #     1 / counts[1]
@@ -111,13 +128,14 @@ def main(args):
 
     model = smp.Unet("resnet34").cuda()
     # model.load_state_dict(torch.load("./first_launch/epoch_7_score_0.9234.pth"))
-    loss_fn = nn.BCEWithLogitsLoss()
+
+    loss_fn = MyLoss()
     optimizer = Adam(model.parameters(), lr=START_LR)
     scaler = GradScaler()
     scheduler = ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.4, patience=5, verbose=True
+        optimizer, mode="max", factor=0.5, patience=3, verbose=True
     )
-    cp_handler = CheckpointHandler(model, WEIGHT_PATH, 5)
+    cp_handler = CheckpointHandler(model, WEIGHT_PATH, 1)
     for e in range(1, EPOCH + 1):
         metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
         metrics_val = validation_full_image(val_loader, model, loss_fn)
