@@ -1,31 +1,34 @@
 from functools import partial
-from albumentations.augmentations import transforms
+from pathlib import Path
+from pydoc import locate
 
+import hydra
 import numpy as np
 import pandas as pd
 import segmentation_models_pytorch as smp
 import torch
 import torch.nn as nn
+from albumentations.augmentations import transforms
+from omegaconf import DictConfig, OmegaConf
+from pytorch_toolbelt.losses import DiceLoss
 from torch.cuda.amp import GradScaler
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, WeightedRandomSampler
-from pathlib import Path
+from torch.utils.data import DataLoader, WeightedRandomSampler, dataset
 
 from src.datasets.dataset import ImageDataset, ImageDatasetV2
 from src.datasets.zarr_dataset import ZarrTrainDataset, ZarrValidDataset
 from src.loops.loops import train, validation, validation_full_image
 from src.transforms.transform import (
     base_transform,
-    valid_transform,
     baseline_aug,
     baseline_aug_v2,
     public_hard_aug,
+    valid_transform,
 )
 from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES
-import argparse
-from pytorch_toolbelt.losses import DiceLoss
+from torch.utils.tensorboard import SummaryWriter
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
@@ -51,98 +54,135 @@ def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
         worker_init_fn=worker_init_fn,
     )
 
-def main(args):
 
-    # CONSTANTS
-    FOLD = int(args.fold)
-    BATCH_SIZE = args.batch_size
-    NUM_WORKERS = 10
-    START_LR = args.start_lr
-    EPOCH = args.epoch
-    CROP_SIZE = args.crop_size
-    TRAIN_IMG_SIZE = args.train_img_size
-    WEIGHT_PATH = f"./weights/{args.w_path}_{args.encoder}/fold_{FOLD}"
-    ITERS = args.iter
-    USE_PDF = args.use_pdf
+@hydra.main(config_path="./configs", config_name="default")
+def main(cfg: DictConfig):
+
+    # print(OmegaConf.to_yaml(cfg))
+
+    exp_dir_name = f"{cfg.EXP_NAME}_{cfg.DATASET.MODE}_{cfg.DATASET.CROP_SIZE}_{cfg.DATASET.IMG_SIZE}"
+    cp_path = Path(cfg.CP.CP_DIR) / exp_dir_name / str(cfg.FOLD)
 
     df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
-    input_path = "../input/zarr_train_orig"
-    crop_img_path = Path("../input/train_v3_4096_1024/images")
+    # zarr_input_path = "../input/zarr_train_orig"
+    # crop_img_path = Path("../input/train_v3_4096_1024")
 
-    print(args)
+    if cfg.DATASET.MODE == "pretrained":
+        df_crops_meta = pd.read_csv(Path(cfg.PREPAIRED.CROP_PATH) / "meta.csv")
+        df_crops_meta["fold"] = -1
+        for fold_idx, img_ids in FOLD_IMGS.items():
+            df_crops_meta.loc[df_crops_meta["img_id"].isin(img_ids), "fold"] = fold_idx
 
+        # df["file"] = df["file"].apply(lambda x: str(input_path / "images" / Path(x).name))
+        df_train = df_crops_meta[df_crops_meta["fold"] != cfg.FOLD].reset_index(
+            drop=True
+        )
+        # df_valid = df_crops_meta[df_crops_meta["fold"] == FOLD].reset_index(drop=True)
+        df_train["back_prob"] = -1
+        counts = df_train["glomerulus_pix"].value_counts()
+        zero_gl = counts[0]
+        non_zero_gl = len(df_train) - zero_gl
+        sampler_weigths = cfg.PREPAIRED.BATCH_TARGET_WEIGHTS
+        df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (
+            1 / zero_gl
+        ) * sampler_weigths[0]
+        df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (
+            1 / non_zero_gl
+        ) * sampler_weigths[1]
 
+        sampler = WeightedRandomSampler(df_train["back_prob"].values, len(df_train))
 
-    train_img_ids = [
-        x for fold, fold_imgs in FOLD_IMGS.items() for x in fold_imgs if fold != FOLD
-    ]
+        if cfg.DEBUG_MODE is True:
+            df_train = df_train[:40]
+            sampler = None
+        get_loader = partial(
+            _get_loader,
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            num_workers=cfg.TRAIN.NUM_WORKERS,
+            shuffle=True,
+        )
+        train_loader = get_loader(
+            ImageDataset(df_train, baseline_aug(cfg.DATASET.IMG_SIZE)),
+            sampler=sampler,
+            shuffle=False,
+        )
+    if cfg.DATASET.MODE == "zarr":
+        train_img_ids = [
+            x
+            for fold, fold_imgs in FOLD_IMGS.items()
+            for x in fold_imgs
+            if fold != cfg.FOLD
+        ]
+        get_loader = partial(
+            _get_loader,
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            num_workers=cfg.TRAIN.NUM_WORKERS,
+            shuffle=True,
+        )
+        iter_counts = cfg.TRAIN.ITERATIONS_PER_EPOCH * cfg.TRAIN.BATCH_SIZE
+        if cfg.DEBUG_MODE is True:
+            iter_counts = 40
+        train_loader = get_loader(
+            ZarrTrainDataset(
+                img_ids=train_img_ids,
+                img_path=cfg.ZARR.ZARR_PATH,
+                transform=baseline_aug(cfg.DATASET.IMG_SIZE),
+                iterations=iter_counts,
+                pdf_path=cfg.ZARR.PDF,
+                crop_size=cfg.DATASET.CROP_SIZE,
+            )
+        )
 
     val_img_paths = [
         str(img)
-        for img in Path(crop_img_path).glob("*.png")
-        if img.stem.split("_")[0] in FOLD_IMGS[FOLD]
+        for img in (Path(cfg.PREPAIRED.CROP_PATH) / "images").glob("*.png")
+        if img.stem.split("_")[0] in FOLD_IMGS[cfg.FOLD]
     ]
-
-    get_loader = partial(
-        _get_loader, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, shuffle=True,
-    )
-    train_loader = get_loader(
-        ZarrTrainDataset(
-            img_ids=train_img_ids,
-            img_path=input_path,
-            transform=baseline_aug(TRAIN_IMG_SIZE),
-            iterations=ITERS * BATCH_SIZE,
-            pdf_path=USE_PDF,
-            crop_size=CROP_SIZE,
-        )
-    )
-    old_val_loader = get_loader(
-        ImageDatasetV2(val_img_paths, valid_transform(TRAIN_IMG_SIZE)), shuffle=False,
+    val_loader = get_loader(
+        ImageDatasetV2(val_img_paths, valid_transform(cfg.DATASET.IMG_SIZE)),
+        shuffle=False,
     )
 
-    model = smp.Unet(args.encoder, encoder_weights="imagenet").cuda()
+    model = smp.Unet(cfg.MODEL.ENCODER, encoder_weights=cfg.MODEL.WEIGHTS).cuda()
 
-    loss_fn = nn.BCEWithLogitsLoss()
-    optimizer = Adam(model.parameters(), lr=START_LR)
+    loss_fn = locate(cfg.LOSS_FN.NAME)()
+
+    optimizer = locate(cfg.OPTIMIZER.NAME)(
+        params=model.parameters(), **cfg.OPTIMIZER.CFG
+    )
+
     scaler = GradScaler()
-    scheduler = ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.4, patience=5, verbose=True
+    scheduler = locate(cfg.OPTIMIZER.SCHEDULER.NAME)(
+        optimizer=optimizer, **cfg.OPTIMIZER.SCHEDULER.CFG
     )
-    cp_handler = CheckpointHandler(model, WEIGHT_PATH, 5)
+    cp_handler = CheckpointHandler(model, cp_path, cfg.CP.BEST_CP_COUNT)
+    writer = SummaryWriter(
+        log_dir=cfg.LOGGING.TENSORBOARD_LOG_DIR, comment=exp_dir_name
+    )
 
-    for e in range(1, EPOCH + 1):
+    for e in range(1, cfg.TRAIN.EPOCH + 1):
         metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
-        metrics_val = validation(old_val_loader, model, loss_fn)
+        metrics_val = validation(val_loader, model, loss_fn)
         dice_mean = metrics_val["dice_mean"]
         val_loss = metrics_val["loss_val"]
 
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
         log += f"avg_dice: {dice_mean:.4f}; "
         print(log, end="")
+
+        writer.add_scalar("Loss/train", metrics_train["loss_train"], e)
+        writer.add_scalar("Loss/valid", metrics_val["loss_val"], e)
+        writer.add_scalar("Dice_mean/valid", metrics_val["dice_mean"], e)
+
         cp_handler.update(e, dice_mean)
         scheduler.step(dice_mean)
         print("")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="")
-    parser.add_argument("--model_save_path", default="./", type=str, help="valid path")
-
-    parser.add_argument("--fold", type=int, default=0, help="fold")
-    parser.add_argument("--epoch", type=int, default=60, help="total epochs")
-    parser.add_argument("--batch_size", type=int, default=24, help="batch size")
-    parser.add_argument("--crop_size", type=int, default=1024, help="batch size")
-    parser.add_argument("--train_img_size", type=int, default=1024, help="batch size")
-    parser.add_argument("--w_path", type=str, default="test", help="batch size")
-    parser.add_argument("--use_pdf", type=bool, default=False, help="batch size")
-    parser.add_argument("--iter", type=int, default=100, help="total epochs")
-    parser.add_argument("--start_lr", type=float, default=0.001, help="total epochs")
-    parser.add_argument("--encoder", type=str, default="resnet34", help="total epochs")
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
 
-    args = parser.parse_args()
-
-    main(args)
+    main()
 

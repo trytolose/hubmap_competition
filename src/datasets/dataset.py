@@ -21,11 +21,11 @@ class ImageDataset(Dataset):
         img = cv2.imread(img_path)
         mask = cv2.imread(mask_path, 0)
         transormed = self.transforms(image=img, mask=mask)
-        return (
-            transormed["image"],
-            transormed["mask"].unsqueeze(0).float(),
-            Path(img_path).stem,
-        )
+        return {
+            "image": transormed["image"],
+            "mask": transormed["mask"].unsqueeze(0).float(),
+            "file_name": Path(img_path).stem,
+        }
 
 
 class ImageDatasetV2(Dataset):

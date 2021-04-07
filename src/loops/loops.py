@@ -48,6 +48,7 @@ def validation(data_loader, model, loss_fn):
     metrics["dice_pos"] = dice_per_crop[non_empty_indexes].mean()
     metrics["dice_neg"] = dice_per_crop[~non_empty_indexes].mean()
     metrics["loss_val"] = np.mean(val_loss)
+    del image, mask
     return metrics
 
 

@@ -1,0 +1,60 @@
+hydra:
+  run:
+    dir: "."
+  output_subdir: null
+
+EXP_NAME: "test"
+DEBUG_MODE: true
+FOLD: 0
+
+ZARR:
+  ZARR_PATH: "../input/zarr_train_orig"
+  PDF: false
+
+PREPAIRED:
+  CROP_PATH: "../input/train_v1_1024"
+  BATCH_TARGET_WEIGHTS: [0.5, 0.5]
+
+DATASET:
+  MODE: 'zarr' # 'pretrained' #'zarr'
+  CROP_SIZE: 1024
+  IMG_SIZE: 1024
+
+TRAIN:
+  EPOCH: 90
+  ITERATIONS_PER_EPOCH: 100
+  BATCH_SIZE: 22
+  START_LR: 0.001
+  NUM_WORKERS: 10
+
+VAL:
+  MODE: "crops"
+  BATCH_SIZE: 24
+
+MODEL:
+  TYPE: "Unet"
+  ENCODER: "resnet34"
+  WEIGHTS: "imagenet"
+  # PRETRAINED: none
+
+OPTIMIZER:
+  NAME: "torch.optim.Adam"
+  CFG:
+    lr: 0.001
+  SCHEDULER:
+    NAME: "torch.optim.lr_scheduler.ReduceLROnPlateau"
+    CFG:
+      mode: "max"
+      patience: 5
+      factor: 0.5
+      verbose: true
+LOSS_FN: 
+  NAME: "torch.nn.BCEWithLogitsLoss"
+
+CP:
+  CP_DIR: "./weights"
+  BEST_CP_COUNT: 5
+LOGGING:
+  TENSORBOARD_LOG_DIR: "./tensorboard"
+
+
