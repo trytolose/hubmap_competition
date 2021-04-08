@@ -7,14 +7,10 @@ import numpy as np
 import pandas as pd
 import segmentation_models_pytorch as smp
 import torch
-import torch.nn as nn
-from albumentations.augmentations import transforms
 from omegaconf import DictConfig, OmegaConf
 from pytorch_toolbelt.losses import DiceLoss
 from torch.cuda.amp import GradScaler
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, WeightedRandomSampler, dataset
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.datasets.dataset import ImageDataset, ImageDatasetV2
 from src.datasets.zarr_dataset import ZarrTrainDataset, ZarrValidDataset
@@ -27,7 +23,7 @@ from src.transforms.transform import (
     valid_transform,
 )
 from src.utils.checkpoint import CheckpointHandler
-from src.utils.utils import IMAGE_SIZES
+from src.utils.utils import IMAGE_SIZES, get_lr
 from torch.utils.tensorboard import SummaryWriter
 
 FOLD_IMGS = {
@@ -58,7 +54,7 @@ def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
 @hydra.main(config_path="./configs", config_name="default")
 def main(cfg: DictConfig):
 
-    # print(OmegaConf.to_yaml(cfg))
+    print(OmegaConf.to_yaml(cfg))
 
     exp_dir_name = f"{cfg.EXP_NAME}_{cfg.DATASET.MODE}_{cfg.DATASET.CROP_SIZE}_{cfg.DATASET.IMG_SIZE}"
     cp_path = Path(cfg.CP.CP_DIR) / exp_dir_name / str(cfg.FOLD)
@@ -67,7 +63,7 @@ def main(cfg: DictConfig):
     # zarr_input_path = "../input/zarr_train_orig"
     # crop_img_path = Path("../input/train_v3_4096_1024")
 
-    if cfg.DATASET.MODE == "pretrained":
+    if cfg.DATASET.MODE == "prepaired":
         df_crops_meta = pd.read_csv(Path(cfg.PREPAIRED.CROP_PATH) / "meta.csv")
         df_crops_meta["fold"] = -1
         for fold_idx, img_ids in FOLD_IMGS.items():
@@ -155,10 +151,11 @@ def main(cfg: DictConfig):
     scheduler = locate(cfg.OPTIMIZER.SCHEDULER.NAME)(
         optimizer=optimizer, **cfg.OPTIMIZER.SCHEDULER.CFG
     )
-    cp_handler = CheckpointHandler(model, cp_path, cfg.CP.BEST_CP_COUNT)
-    writer = SummaryWriter(
-        log_dir=cfg.LOGGING.TENSORBOARD_LOG_DIR, comment=exp_dir_name
-    )
+    if cfg.DEBUG_MODE is False:
+        cp_handler = CheckpointHandler(model, cp_path, cfg.CP.BEST_CP_COUNT)
+        writer = SummaryWriter(
+            log_dir=Path(cfg.LOGGING.TENSORBOARD_LOG_DIR) / exp_dir_name
+        )
 
     for e in range(1, cfg.TRAIN.EPOCH + 1):
         metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
@@ -169,12 +166,13 @@ def main(cfg: DictConfig):
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
         log += f"avg_dice: {dice_mean:.4f}; "
         print(log, end="")
+        if cfg.DEBUG_MODE is False:
+            writer.add_scalar("Loss/train", metrics_train["loss_train"], e)
+            writer.add_scalar("Loss/valid", metrics_val["loss_val"], e)
+            writer.add_scalar("Dice_mean/valid", metrics_val["dice_mean"], e)
+            writer.add_scalar("Learning rate", get_lr(optimizer), e)
 
-        writer.add_scalar("Loss/train", metrics_train["loss_train"], e)
-        writer.add_scalar("Loss/valid", metrics_val["loss_val"], e)
-        writer.add_scalar("Dice_mean/valid", metrics_val["dice_mean"], e)
-
-        cp_handler.update(e, dice_mean)
+            cp_handler.update(e, dice_mean)
         scheduler.step(dice_mean)
         print("")
 

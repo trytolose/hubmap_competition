@@ -1,0 +1,11 @@
+EXP_NAME: "4096_1028_prepaired"
+DEBUG_MODE: false
+DATASET:
+  MODE: 'prepaired' 
+  CROP_SIZE: 4096
+  IMG_SIZE: 1024
+PREPAIRED:
+  CROP_PATH: "../input/train_v3_4096_1024"
+TRAIN:
+  EPOCH: 50
+  ITERATIONS_PER_EPOCH: 50

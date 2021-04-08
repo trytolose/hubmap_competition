@@ -1,0 +1,16 @@
+EXP_NAME: "4096_1028_random_zarr_resnest50d"
+DEBUG_MODE: false
+DATASET:
+  MODE: 'zarr' 
+  CROP_SIZE: 4096
+  IMG_SIZE: 1024
+PREPAIRED:
+  CROP_PATH: "../input/train_v3_4096_1024"
+TRAIN:
+  EPOCH: 50
+  ITERATIONS_PER_EPOCH: 100
+  BATCH_SIZE: 8
+
+MODEL:
+  TYPE: "Unet"
+  ENCODER: "timm-resnest50d"

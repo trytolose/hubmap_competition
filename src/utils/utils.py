@@ -36,6 +36,11 @@ IMAGE_SIZES = {
 }
 
 
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group["lr"]
+
+
 def mask2rle(img):
     """
     img: numpy array, 1 - mask, 0 - background
