@@ -44,10 +44,10 @@ OPTIMIZER:
   SCHEDULER:
     NAME: "torch.optim.lr_scheduler.ReduceLROnPlateau"
     CFG:
-      mode: "max"
-      patience: 5
-      factor: 0.5
-      verbose: true
+      # mode: "max"
+      # patience: 5
+      # factor: 0.5
+      # verbose: true
 LOSS_FN: 
   NAME: "torch.nn.BCEWithLogitsLoss"
 

@@ -54,7 +54,7 @@ def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
 @hydra.main(config_path="./configs", config_name="default")
 def main(cfg: DictConfig):
 
-    print(OmegaConf.to_yaml(cfg))
+    # print(OmegaConf.to_yaml(cfg))
 
     exp_dir_name = f"{cfg.EXP_NAME}_{cfg.DATASET.MODE}_{cfg.DATASET.CROP_SIZE}_{cfg.DATASET.IMG_SIZE}"
     cp_path = Path(cfg.CP.CP_DIR) / exp_dir_name / str(cfg.FOLD)
@@ -173,7 +173,8 @@ def main(cfg: DictConfig):
             writer.add_scalar("Learning rate", get_lr(optimizer), e)
 
             cp_handler.update(e, dice_mean)
-        scheduler.step(dice_mean)
+        scheduler.step(e - 1)
+        # scheduler.step(dice_mean)
         print("")
 
 
