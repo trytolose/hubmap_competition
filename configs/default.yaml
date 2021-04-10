@@ -9,6 +9,7 @@ FOLD: 0
 
 ZARR:
   ZARR_PATH: "../input/zarr_train_orig"
+  CALC_COORD_PATH: "../input/calc_coords"
   PDF: false
 
 PREPAIRED:
@@ -19,6 +20,7 @@ DATASET:
   MODE: 'zarr' # 'pretrained' #'zarr'
   CROP_SIZE: 1024
   IMG_SIZE: 1024
+  STEP: 1024
 
 TRAIN:
   EPOCH: 90

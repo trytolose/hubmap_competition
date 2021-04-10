@@ -5,6 +5,8 @@ import zarr
 import numpy as np
 import math
 from scipy.special import softmax
+import pandas as pd
+from tqdm import tqdm
 
 IMG_SIZES = {
     "2f6ecfcdf": (31278, 25794),
@@ -85,11 +87,6 @@ class ZarrTrainDataset(Dataset):
             x = np.random.randint(0, w - self.crop_size)
             y = np.random.randint(0, h - self.crop_size)
             img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
-            # while not _check_background(img, self.crop_size):
-            #     x = np.random.randint(0, w - self.crop_size)
-            #     y = np.random.randint(0, h - self.crop_size)
-            #     img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
-            # print(f"x: {x} y: {y} count: {count}")
 
         mask = self.zarr[img_id + "_mask"][
             y : y + self.crop_size, x : x + self.crop_size
@@ -153,3 +150,88 @@ def _check_background(img, crop_size) -> bool:
     _, ss, _ = cv2.split(hsv)
     background = False if (ss > s_th).sum() <= p_th or img.sum() <= p_th else True
     return background
+
+
+class ZarrDatasetV2(Dataset):
+    def __init__(
+        self,
+        img_ids,
+        img_path,
+        transform,
+        df_path,
+        crop_size=1024,
+        step=1024,
+        shift_limit_x=None,
+        shift_limit_y=None,
+        mode="train",
+    ):
+        self.transform = transform
+        self.crop_size = crop_size
+        self.zarr = zarr.open(img_path, mode="r")
+
+        if df_path.is_file():
+            self.df = pd.read_csv(df_path)
+        else:
+            self.df = get_crop_coords(self.zarr, img_ids, crop_size, step)
+            self.df.to_csv(df_path, index=False)
+
+        self.shift_limit_x = shift_limit_x
+        self.shift_limit_y = shift_limit_y
+        self.mode = mode
+        print(len(self.df))
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        img_id, x, y, _ = self.df.loc[idx]
+        if self.mode == "train":
+            if self.shift_limit_x is not None and self.shift_limit_y is not None:
+                x, y = self._get_shifted_coord(img_id, x, y)
+        img = self.zarr[img_id][y : y + self.crop_size, x : x + self.crop_size]
+
+        mask = self.zarr[img_id + "_mask"][
+            y : y + self.crop_size, x : x + self.crop_size
+        ]
+        transormed = self.transform(image=img, mask=mask)
+        return {
+            "image": transormed["image"],
+            "mask": transormed["mask"].unsqueeze(0).float(),
+        }
+
+    def _get_shifted_coord(self, img_id, x, y):
+        x_shift = np.random.randint(self.shift_limit_x[0], self.shift_limit_x[1])
+        y_shift = np.random.randint(self.shift_limit_y[0], self.shift_limit_y[1])
+        x0 = x + x_shift
+        x1 = x + self.crop_size + x_shift
+        y0 = y + y_shift
+        y1 = y + self.crop_size + y_shift
+
+        if x1 >= IMG_SIZES[img_id][1]:
+            x0 = IMG_SIZES[img_id][1] - self.crop_size
+        if y1 >= IMG_SIZES[img_id][0]:
+            y0 = IMG_SIZES[img_id][0] - self.crop_size
+        return x0, y0
+
+
+def get_crop_coords(zarr, img_ids, crop_size, step):
+    coord = []
+    print("create crops dataset:")
+    for img_id in tqdm(img_ids, ncols=70, leave=True):
+        image = zarr[img_id]
+        h, w = image.shape[:2]
+
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+
+                if x + crop_size > w:
+                    x = w - crop_size
+                if y + crop_size > h:
+                    y = h - crop_size
+
+                crop_image = image[y : y + crop_size, x : x + crop_size]
+                if _check_background(crop_image, crop_size):
+                    mask = zarr[f"{img_id}_mask"][y : y + crop_size, x : x + crop_size]
+                    coord.append((img_id, x, y, mask.sum()))
+
+    return pd.DataFrame(coord, columns=["img_id", "x", "y", "glomerulus_pix"])

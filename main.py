@@ -13,7 +13,7 @@ from torch.cuda.amp import GradScaler
 from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.datasets.dataset import ImageDataset, ImageDatasetV2
-from src.datasets.zarr_dataset import ZarrTrainDataset, ZarrValidDataset
+from src.datasets.zarr_dataset import ZarrTrainDataset, ZarrValidDataset, ZarrDatasetV2
 from src.loops.loops import train, validation, validation_full_image
 from src.transforms.transform import (
     base_transform,
@@ -54,7 +54,7 @@ def _get_loader(dataset, batch_size, num_workers, sampler=None, shuffle=True):
 @hydra.main(config_path="./configs", config_name="default")
 def main(cfg: DictConfig):
 
-    # print(OmegaConf.to_yaml(cfg))
+    print(OmegaConf.to_yaml(cfg))
 
     exp_dir_name = f"{cfg.EXP_NAME}_{cfg.DATASET.MODE}_{cfg.DATASET.CROP_SIZE}_{cfg.DATASET.IMG_SIZE}"
     cp_path = Path(cfg.CP.CP_DIR) / exp_dir_name / str(cfg.FOLD)
@@ -129,15 +129,91 @@ def main(cfg: DictConfig):
             )
         )
 
-    val_img_paths = [
-        str(img)
-        for img in (Path(cfg.PREPAIRED.CROP_PATH) / "images").glob("*.png")
-        if img.stem.split("_")[0] in FOLD_IMGS[cfg.FOLD]
-    ]
-    val_loader = get_loader(
-        ImageDatasetV2(val_img_paths, valid_transform(cfg.DATASET.IMG_SIZE)),
+    if cfg.DATASET.MODE == "zarr_prepaired":
+        train_img_ids = [
+            x
+            for fold, fold_imgs in FOLD_IMGS.items()
+            for x in fold_imgs
+            if fold != cfg.FOLD
+        ]
+        df_coord_name = f"train_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.STEP}.csv"
+        df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
+
+        zarr_ds = ZarrDatasetV2(
+            img_ids=train_img_ids,
+            img_path=cfg.ZARR.ZARR_PATH,
+            transform=public_hard_aug(cfg.DATASET.IMG_SIZE),
+            crop_size=cfg.DATASET.CROP_SIZE,
+            step=cfg.DATASET.CROP_SIZE,
+            df_path=df_path,
+        )
+
+        df_train = zarr_ds.df.copy()
+        df_train["back_prob"] = -1
+        counts = df_train["glomerulus_pix"].value_counts()
+        zero_gl = counts[0]
+        non_zero_gl = len(df_train) - zero_gl
+        sampler_weigths = cfg.PREPAIRED.BATCH_TARGET_WEIGHTS
+        df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (
+            1 / zero_gl
+        ) * sampler_weigths[0]
+        df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (
+            1 / non_zero_gl
+        ) * sampler_weigths[1]
+
+        sampler = WeightedRandomSampler(df_train["back_prob"].values, len(df_train))
+
+        train_loader = DataLoader(
+            dataset=zarr_ds,
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            num_workers=cfg.TRAIN.NUM_WORKERS,
+            sampler=sampler,
+            shuffle=False,
+        )
+    df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.STEP}.csv"
+    df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
+
+    val_loader = DataLoader(
+        dataset=ZarrDatasetV2(
+            img_ids=FOLD_IMGS[cfg.FOLD],
+            img_path=cfg.ZARR.ZARR_PATH,
+            transform=valid_transform(cfg.DATASET.IMG_SIZE),
+            crop_size=cfg.DATASET.CROP_SIZE,
+            step=cfg.DATASET.CROP_SIZE,
+            df_path=df_path,
+            mode="valid",
+        ),
+        batch_size=cfg.TRAIN.BATCH_SIZE,
+        num_workers=cfg.TRAIN.NUM_WORKERS,
         shuffle=False,
     )
+
+    # df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE*16}_img_{cfg.DATASET.IMG_SIZE*16}_step_{cfg.DATASET.STEP*4}.csv"
+    # df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
+    # val_loader_x4 = DataLoader(
+    #     dataset=ZarrDatasetV2(
+    #         img_ids=FOLD_IMGS[cfg.FOLD],
+    #         img_path=cfg.ZARR.ZARR_PATH,
+    #         transform=valid_transform(cfg.DATASET.IMG_SIZE * 16),
+    #         crop_size=cfg.DATASET.CROP_SIZE * 16,
+    #         step=cfg.DATASET.STEP * 4,
+    #         df_path=df_path,
+    #         mode="valid",
+    #     ),
+    #     batch_size=2,
+    #     num_workers=cfg.TRAIN.NUM_WORKERS,
+    #     shuffle=False,
+    # )
+
+    # val_img_paths = [
+    #     str(img)
+    #     for img in (Path(cfg.PREPAIRED.CROP_PATH) / "images").glob("*.png")
+    #     if img.stem.split("_")[0] in FOLD_IMGS[cfg.FOLD]
+    # ]
+    # val_loader = get_loader(
+    #     ImageDatasetV2(val_img_paths, valid_transform(cfg.DATASET.IMG_SIZE)),
+    #     shuffle=False,
+    # )
 
     model = smp.Unet(cfg.MODEL.ENCODER, encoder_weights=cfg.MODEL.WEIGHTS).cuda()
 
@@ -160,11 +236,15 @@ def main(cfg: DictConfig):
     for e in range(1, cfg.TRAIN.EPOCH + 1):
         metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
         metrics_val = validation(val_loader, model, loss_fn)
+        # metrics_val_x4 = validation(val_loader_x4, model, loss_fn)
+
         dice_mean = metrics_val["dice_mean"]
         val_loss = metrics_val["loss_val"]
 
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
         log += f"avg_dice: {dice_mean:.4f}; "
+        # log += f"avg_dice_x4: {metrics_val_x4['dice_mean']:.4f}; "
+
         print(log, end="")
         if cfg.DEBUG_MODE is False:
             writer.add_scalar("Loss/train", metrics_train["loss_train"], e)
@@ -173,8 +253,8 @@ def main(cfg: DictConfig):
             writer.add_scalar("Learning rate", get_lr(optimizer), e)
 
             cp_handler.update(e, dice_mean)
-        scheduler.step(e - 1)
-        # scheduler.step(dice_mean)
+        # scheduler.step(e - 1)
+        scheduler.step(dice_mean)
         print("")
 
 
