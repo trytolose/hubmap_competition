@@ -21,6 +21,7 @@ from src.transforms.transform import (
     baseline_aug_v2,
     public_hard_aug,
     valid_transform,
+    public_hard_aug_v2,
 )
 from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES, get_lr
@@ -142,7 +143,7 @@ def main(cfg: DictConfig):
         zarr_ds = ZarrDatasetV2(
             img_ids=train_img_ids,
             img_path=cfg.ZARR.ZARR_PATH,
-            transform=public_hard_aug(cfg.DATASET.IMG_SIZE),
+            transform=public_hard_aug_v2(cfg.DATASET.IMG_SIZE),
             crop_size=cfg.DATASET.CROP_SIZE,
             step=cfg.DATASET.CROP_SIZE,
             df_path=df_path,
@@ -170,7 +171,7 @@ def main(cfg: DictConfig):
             sampler=sampler,
             shuffle=False,
         )
-    df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.STEP}.csv"
+    df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.CROP_SIZE}.csv"
     df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
 
     val_loader = DataLoader(

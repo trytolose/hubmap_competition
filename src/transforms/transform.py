@@ -1,4 +1,9 @@
 import albumentations as A
+from albumentations.augmentations.transforms import (
+    ElasticTransform,
+    GridDistortion,
+    OpticalDistortion,
+)
 from albumentations.pytorch import ToTensorV2
 
 
@@ -95,3 +100,40 @@ def public_hard_aug(img_size):
         ]
     )
 
+
+def public_hard_aug_v2(img_size):
+    return A.Compose(
+        [
+            A.Resize(img_size, img_size),
+            A.OneOf(
+                [
+                    A.RandomBrightness(limit=0.45, p=1),
+                    A.RandomContrast(limit=0.45, p=1),
+                    A.RandomGamma((20, 80), p=1),
+                ],
+                p=0.5,
+            ),
+            A.Blur(blur_limit=20, p=0.4),
+            A.OneOf([A.GaussNoise(mean=-20, p=0.5), A.IAAAffine(p=0.5),], p=0.4),
+            A.RandomRotate90(p=0.5),
+            A.HorizontalFlip(p=0.5),
+            A.VerticalFlip(p=0.5),
+            A.Cutout(
+                num_holes=10,
+                max_h_size=int(0.1 * img_size),
+                max_w_size=int(0.1 * img_size),
+                p=0.3,
+            ),
+            A.OneOf(
+                [
+                    A.ShiftScaleRotate(scale_limit=0.3, p=0.25),
+                    A.OpticalDistortion(distort_limit=(0.3, 1.0), p=0.25),
+                    A.ElasticTransform(alpha=3, sigma=100, alpha_affine=80, p=0.25),
+                    A.GridDistortion(p=0.25),
+                ],
+                p=0.25,
+            ),
+            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225],),
+            ToTensorV2(),
+        ]
+    )
