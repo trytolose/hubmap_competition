@@ -104,7 +104,6 @@ def public_hard_aug(img_size):
 def public_hard_aug_v2(img_size):
     return A.Compose(
         [
-            A.Resize(img_size, img_size),
             A.OneOf(
                 [
                     A.RandomBrightness(limit=0.45, p=1),
@@ -134,6 +133,7 @@ def public_hard_aug_v2(img_size):
                 p=0.25,
             ),
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225],),
+            A.Resize(img_size, img_size),
             ToTensorV2(),
         ]
     )

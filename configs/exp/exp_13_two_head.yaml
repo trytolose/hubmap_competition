@@ -1,18 +1,21 @@
-EXP_NAME: "1024_no_resize_pseudo_v0"
+EXP_NAME: "1024_512_two_head_dice_pos"
+FOLD: 0
 DEBUG_MODE: false
 DATASET:
   MODE: 'zarr_prepaired' 
   CROP_SIZE: 1024
-  IMG_SIZE: 1024
-  STEP: 512
-  PSEUDO_IDS: ["aa05346ff"]
+  IMG_SIZE: 512
+  STEP: 1024
 PREPAIRED:
   CROP_PATH: "../input/train_v3_4096_1024"
   BATCH_TARGET_WEIGHTS: [0.5, 0.5]
 TRAIN:
-  EPOCH: 100
+  EPOCH: 50
   ITERATIONS_PER_EPOCH: 50
-  BATCH_SIZE: 22
+  BATCH_SIZE: 64
+  NUM_WORKERS: 30
+VAL:
+  BATCH_SIZE: 64
 
 OPTIMIZER:
   NAME: "torch.optim.Adam"
@@ -22,13 +25,19 @@ OPTIMIZER:
     NAME: "torch.optim.lr_scheduler.ReduceLROnPlateau"
     CFG:
       mode: "max"
-      patience: 5
+      patience: 4
       factor: 0.5
       verbose: true
 
-LOSS_FN: 
-  NAME: "src.losses.losses.MyLoss"
-
 MODEL:
-  TYPE: "Unet"
-  ENCODER: "resnet34"
+    CFG:
+      encoder_name: "resnet34"
+      encoder_weights: "imagenet"
+      aux_params: 
+        classes: 1
+        activation: null
+
+# LOSS_FN: 
+#   NAME: "src.losses.losses.MyLoss"
+
+KEY_METRIC: "dice_pos"

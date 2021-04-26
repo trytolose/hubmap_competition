@@ -1,18 +1,16 @@
-EXP_NAME: "1024_no_resize_pseudo_v0"
+EXP_NAME: "1028_256_prepaired_zarr_public_augs3_w_05_05_bce"
 DEBUG_MODE: false
 DATASET:
   MODE: 'zarr_prepaired' 
   CROP_SIZE: 1024
-  IMG_SIZE: 1024
-  STEP: 512
-  PSEUDO_IDS: ["aa05346ff"]
+  IMG_SIZE: 256
 PREPAIRED:
   CROP_PATH: "../input/train_v3_4096_1024"
   BATCH_TARGET_WEIGHTS: [0.5, 0.5]
 TRAIN:
   EPOCH: 100
   ITERATIONS_PER_EPOCH: 50
-  BATCH_SIZE: 22
+  BATCH_SIZE: 32
 
 OPTIMIZER:
   NAME: "torch.optim.Adam"
@@ -25,10 +23,3 @@ OPTIMIZER:
       patience: 5
       factor: 0.5
       verbose: true
-
-LOSS_FN: 
-  NAME: "src.losses.losses.MyLoss"
-
-MODEL:
-  TYPE: "Unet"
-  ENCODER: "resnet34"

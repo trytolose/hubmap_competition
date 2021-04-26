@@ -21,22 +21,23 @@ DATASET:
   CROP_SIZE: 1024
   IMG_SIZE: 1024
   STEP: 1024
+  PSEUDO_IDS: []
 
 TRAIN:
   EPOCH: 90
   ITERATIONS_PER_EPOCH: 100
   BATCH_SIZE: 22
   START_LR: 0.001
-  NUM_WORKERS: 10
+  NUM_WORKERS: 12
 
 VAL:
   MODE: "crops"
   BATCH_SIZE: 24
 
 MODEL:
-  TYPE: "Unet"
-  ENCODER: "resnet34"
-  WEIGHTS: "imagenet"
+    CFG:
+      encoder_name: "resnet34"
+      encoder_weights: "imagenet"
   # PRETRAINED: none
 
 OPTIMIZER:
@@ -60,3 +61,4 @@ LOGGING:
   TENSORBOARD_LOG_DIR: "./tensorboard"
 
 
+KEY_METRIC: "dice_mean"

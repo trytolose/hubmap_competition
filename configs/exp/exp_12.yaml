@@ -1,4 +1,4 @@
-EXP_NAME: "1024_no_resize_pseudo_v0"
+EXP_NAME: "1024_no_resize_pseudo_v0_retrain"
 DEBUG_MODE: false
 DATASET:
   MODE: 'zarr_prepaired' 
@@ -10,7 +10,7 @@ PREPAIRED:
   CROP_PATH: "../input/train_v3_4096_1024"
   BATCH_TARGET_WEIGHTS: [0.5, 0.5]
 TRAIN:
-  EPOCH: 100
+  EPOCH: 60
   ITERATIONS_PER_EPOCH: 50
   BATCH_SIZE: 22
 

@@ -184,7 +184,8 @@ class ZarrDatasetV2(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        img_id, x, y, _ = self.df.loc[idx]
+        img_id, x, y, pix_count = self.df.loc[idx]
+        pix_count = 1 if pix_count > 20 else 0
         if self.mode == "train":
             if self.shift_limit_x is not None and self.shift_limit_y is not None:
                 x, y = self._get_shifted_coord(img_id, x, y)
@@ -197,6 +198,8 @@ class ZarrDatasetV2(Dataset):
         return {
             "image": transormed["image"],
             "mask": transormed["mask"].unsqueeze(0).float(),
+            "crop_names": f"{img_id}_{x}_{y}",
+            "target": float(pix_count),
         }
 
     def _get_shifted_coord(self, img_id, x, y):

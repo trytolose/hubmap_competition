@@ -14,7 +14,12 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 
 from src.datasets.dataset import ImageDataset, ImageDatasetV2
 from src.datasets.zarr_dataset import ZarrTrainDataset, ZarrValidDataset, ZarrDatasetV2
-from src.loops.loops import train, validation, validation_full_image
+from src.loops.loops import (
+    train,
+    validation,
+    validation_full_image,
+    validation_full_zar,
+)
 from src.transforms.transform import (
     base_transform,
     baseline_aug,
@@ -57,10 +62,12 @@ def main(cfg: DictConfig):
 
     print(OmegaConf.to_yaml(cfg))
 
-    exp_dir_name = f"{cfg.EXP_NAME}_{cfg.DATASET.MODE}_{cfg.DATASET.CROP_SIZE}_{cfg.DATASET.IMG_SIZE}"
+    exp_dir_name = f"FOLD_{cfg.FOLD}_{cfg.EXP_NAME}_{cfg.DATASET.MODE}_{cfg.DATASET.CROP_SIZE}_{cfg.DATASET.IMG_SIZE}"
     cp_path = Path(cfg.CP.CP_DIR) / exp_dir_name / str(cfg.FOLD)
 
-    df = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index("id", drop=True)
+    df_train_reference = pd.read_csv("/hdd/kaggle/hubmap/input_v2/train.csv").set_index(
+        "id", drop=True
+    )
     # zarr_input_path = "../input/zarr_train_orig"
     # crop_img_path = Path("../input/train_v3_4096_1024")
 
@@ -137,13 +144,17 @@ def main(cfg: DictConfig):
             for x in fold_imgs
             if fold != cfg.FOLD
         ]
+        pseudo_ids = cfg.DATASET.PSEUDO_IDS
+        print(pseudo_ids)
+        if len(pseudo_ids) > 0:
+            train_img_ids.extend(pseudo_ids)
+
         df_coord_name = f"train_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.STEP}.csv"
         df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
-
         zarr_ds = ZarrDatasetV2(
             img_ids=train_img_ids,
             img_path=cfg.ZARR.ZARR_PATH,
-            transform=public_hard_aug_v2(cfg.DATASET.IMG_SIZE),
+            transform=public_hard_aug(cfg.DATASET.IMG_SIZE),
             crop_size=cfg.DATASET.CROP_SIZE,
             step=cfg.DATASET.CROP_SIZE,
             df_path=df_path,
@@ -188,35 +199,8 @@ def main(cfg: DictConfig):
         num_workers=cfg.TRAIN.NUM_WORKERS,
         shuffle=False,
     )
-
-    # df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE*16}_img_{cfg.DATASET.IMG_SIZE*16}_step_{cfg.DATASET.STEP*4}.csv"
-    # df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
-    # val_loader_x4 = DataLoader(
-    #     dataset=ZarrDatasetV2(
-    #         img_ids=FOLD_IMGS[cfg.FOLD],
-    #         img_path=cfg.ZARR.ZARR_PATH,
-    #         transform=valid_transform(cfg.DATASET.IMG_SIZE * 16),
-    #         crop_size=cfg.DATASET.CROP_SIZE * 16,
-    #         step=cfg.DATASET.STEP * 4,
-    #         df_path=df_path,
-    #         mode="valid",
-    #     ),
-    #     batch_size=2,
-    #     num_workers=cfg.TRAIN.NUM_WORKERS,
-    #     shuffle=False,
-    # )
-
-    # val_img_paths = [
-    #     str(img)
-    #     for img in (Path(cfg.PREPAIRED.CROP_PATH) / "images").glob("*.png")
-    #     if img.stem.split("_")[0] in FOLD_IMGS[cfg.FOLD]
-    # ]
-    # val_loader = get_loader(
-    #     ImageDatasetV2(val_img_paths, valid_transform(cfg.DATASET.IMG_SIZE)),
-    #     shuffle=False,
-    # )
-
-    model = smp.Unet(cfg.MODEL.ENCODER, encoder_weights=cfg.MODEL.WEIGHTS).cuda()
+    # model = smp.Unet(cfg.MODEL.ENCODER, encoder_weights=cfg.MODEL.WEIGHTS).cuda()
+    model = smp.Unet(**cfg.MODEL.CFG)
 
     loss_fn = locate(cfg.LOSS_FN.NAME)()
 
@@ -236,14 +220,23 @@ def main(cfg: DictConfig):
 
     for e in range(1, cfg.TRAIN.EPOCH + 1):
         metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
-        metrics_val = validation(val_loader, model, loss_fn)
-        # metrics_val_x4 = validation(val_loader_x4, model, loss_fn)
+        # metrics_val = validation(val_loader, model, loss_fn)
+        metrics_val = validation_full_zar(
+            val_loader, model, loss_fn, cfg.DATASET.CROP_SIZE, thr=0.5,
+        )
 
         dice_mean = metrics_val["dice_mean"]
         val_loss = metrics_val["loss_val"]
 
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
         log += f"avg_dice: {dice_mean:.4f}; "
+        log += f"dice_full_mean: {metrics_val['dice_full_mean']:.4f}; "
+        if metrics_val.get("dice_pos", None) is not None:
+            log += f"dice_pos: {metrics_val['dice_pos']:.4f} "
+        if metrics_val.get("cls_rocauc", None) is not None:
+            log += (
+                f"roc_auc: {metrics_val['cls_rocauc']:.4f} f1: {metrics_val['f1']:.4f}"
+            )
         # log += f"avg_dice_x4: {metrics_val_x4['dice_mean']:.4f}; "
 
         print(log, end="")
@@ -251,11 +244,12 @@ def main(cfg: DictConfig):
             writer.add_scalar("Loss/train", metrics_train["loss_train"], e)
             writer.add_scalar("Loss/valid", metrics_val["loss_val"], e)
             writer.add_scalar("Dice_mean/valid", metrics_val["dice_mean"], e)
+            writer.add_scalar("Dice_full/valid", metrics_val["dice_full_mean"], e)
             writer.add_scalar("Learning rate", get_lr(optimizer), e)
 
-            cp_handler.update(e, dice_mean)
+            cp_handler.update(e, metrics_val[cfg.KEY_METRIC])
         # scheduler.step(e - 1)
-        scheduler.step(dice_mean)
+        scheduler.step(metrics_val[cfg.KEY_METRIC])
         print("")
 
 
