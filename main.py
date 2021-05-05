@@ -31,6 +31,7 @@ from src.transforms.transform import (
 from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES, get_lr
 from torch.utils.tensorboard import SummaryWriter
+from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
@@ -110,6 +111,54 @@ def main(cfg: DictConfig):
             sampler=sampler,
             shuffle=False,
         )
+    if cfg.DATASET.MODE == "prepaired_new_split":
+
+        df_crops_meta = pd.read_csv(Path(cfg.PREPAIRED.CROP_PATH) / "meta.csv")
+        strf_cols = [
+            "glomerulus_pix",
+            "medulla",
+            "cortex",
+            "outer_stripe",
+            "Inner medulla",
+            "Outer Medulla",
+        ]
+        for col in strf_cols:
+            df_crops_meta[col] = pd.cut(df_crops_meta[col], 10, labels=np.arange(10))
+
+        df_crops_meta["fold"] = 0
+        mskf = MultilabelStratifiedKFold(n_splits=5, shuffle=True, random_state=0)
+        for fold, (_, test_index) in enumerate(
+            mskf.split(df_crops_meta, df_crops_meta[["img_id"] + strf_cols])
+        ):
+            df_crops_meta.loc[test_index, "fold"] = fold
+
+        df_train = df_crops_meta[df_crops_meta["fold"] != cfg.FOLD].reset_index(
+            drop=True
+        )
+        df_valid = df_crops_meta[df_crops_meta["fold"] == cfg.FOLD].reset_index(
+            drop=True
+        )
+
+        if cfg.DEBUG_MODE is True:
+            df_train = df_train[:40]
+            sampler = None
+        get_loader = partial(
+            _get_loader,
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            num_workers=cfg.TRAIN.NUM_WORKERS,
+            shuffle=True,
+        )
+        train_loader = get_loader(
+            ImageDataset(df_train, baseline_aug(cfg.DATASET.IMG_SIZE)),
+            # sampler=sampler,
+            shuffle=True,
+        )
+        val_loader = get_loader(
+            ImageDataset(df_valid, valid_transform(cfg.DATASET.IMG_SIZE)),
+            # sampler=sampler,
+            shuffle=False,
+        )
+
     if cfg.DATASET.MODE == "zarr":
         train_img_ids = [
             x
@@ -154,7 +203,7 @@ def main(cfg: DictConfig):
         zarr_ds = ZarrDatasetV2(
             img_ids=train_img_ids,
             img_path=cfg.ZARR.ZARR_PATH,
-            transform=public_hard_aug(cfg.DATASET.IMG_SIZE),
+            transform=public_hard_aug_v2(cfg.DATASET.IMG_SIZE),
             crop_size=cfg.DATASET.CROP_SIZE,
             step=cfg.DATASET.CROP_SIZE,
             df_path=df_path,
@@ -182,23 +231,23 @@ def main(cfg: DictConfig):
             sampler=sampler,
             shuffle=False,
         )
-    df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.CROP_SIZE}.csv"
-    df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
+        df_coord_name = f"valid_fold{cfg.FOLD}_crop_{cfg.DATASET.CROP_SIZE}_img_{cfg.DATASET.IMG_SIZE}_step_{cfg.DATASET.CROP_SIZE}.csv"
+        df_path = Path(cfg.ZARR.CALC_COORD_PATH) / df_coord_name
 
-    val_loader = DataLoader(
-        dataset=ZarrDatasetV2(
-            img_ids=FOLD_IMGS[cfg.FOLD],
-            img_path=cfg.ZARR.ZARR_PATH,
-            transform=valid_transform(cfg.DATASET.IMG_SIZE),
-            crop_size=cfg.DATASET.CROP_SIZE,
-            step=cfg.DATASET.CROP_SIZE,
-            df_path=df_path,
-            mode="valid",
-        ),
-        batch_size=cfg.TRAIN.BATCH_SIZE,
-        num_workers=cfg.TRAIN.NUM_WORKERS,
-        shuffle=False,
-    )
+        val_loader = DataLoader(
+            dataset=ZarrDatasetV2(
+                img_ids=FOLD_IMGS[cfg.FOLD],
+                img_path=cfg.ZARR.ZARR_PATH,
+                transform=valid_transform(cfg.DATASET.IMG_SIZE),
+                crop_size=cfg.DATASET.CROP_SIZE,
+                step=cfg.DATASET.CROP_SIZE,
+                df_path=df_path,
+                mode="valid",
+            ),
+            batch_size=cfg.TRAIN.BATCH_SIZE,
+            num_workers=cfg.TRAIN.NUM_WORKERS,
+            shuffle=False,
+        )
     # model = smp.Unet(cfg.MODEL.ENCODER, encoder_weights=cfg.MODEL.WEIGHTS).cuda()
     model = smp.Unet(**cfg.MODEL.CFG)
 
@@ -221,16 +270,20 @@ def main(cfg: DictConfig):
     for e in range(1, cfg.TRAIN.EPOCH + 1):
         metrics_train = train(train_loader, model, optimizer, loss_fn, scaler)
         # metrics_val = validation(val_loader, model, loss_fn)
-        metrics_val = validation_full_zar(
-            val_loader, model, loss_fn, cfg.DATASET.CROP_SIZE, thr=0.5,
-        )
+        if cfg.DATASET.MODE == "prepaired_new_split":
+            metrics_val = validation(val_loader, model, loss_fn)
+        else:
+            metrics_val = validation_full_zar(
+                val_loader, model, loss_fn, cfg.DATASET.CROP_SIZE, thr=0.5,
+            )
 
         dice_mean = metrics_val["dice_mean"]
         val_loss = metrics_val["loss_val"]
 
         log = f"epoch: {e:03d}; loss_train: {metrics_train['loss_train']:.4f}; loss_val: {val_loss:.4f}; "
         log += f"avg_dice: {dice_mean:.4f}; "
-        log += f"dice_full_mean: {metrics_val['dice_full_mean']:.4f}; "
+        if metrics_val.get("dice_full_mean", None) is not None:
+            log += f"dice_full_mean: {metrics_val['dice_full_mean']:.4f}; "
         if metrics_val.get("dice_pos", None) is not None:
             log += f"dice_pos: {metrics_val['dice_pos']:.4f} "
         if metrics_val.get("cls_rocauc", None) is not None:
@@ -244,7 +297,8 @@ def main(cfg: DictConfig):
             writer.add_scalar("Loss/train", metrics_train["loss_train"], e)
             writer.add_scalar("Loss/valid", metrics_val["loss_val"], e)
             writer.add_scalar("Dice_mean/valid", metrics_val["dice_mean"], e)
-            writer.add_scalar("Dice_full/valid", metrics_val["dice_full_mean"], e)
+            if metrics_val.get("dice_full_mean", None) is not None:
+                writer.add_scalar("Dice_full/valid", metrics_val["dice_full_mean"], e)
             writer.add_scalar("Learning rate", get_lr(optimizer), e)
 
             cp_handler.update(e, metrics_val[cfg.KEY_METRIC])

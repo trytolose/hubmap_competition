@@ -1,0 +1,39 @@
+EXP_NAME: "1024_512_new_split_b3"
+DEBUG_MODE: false
+DATASET:
+  MODE: 'prepaired_new_split' 
+  CROP_SIZE: 1024
+  IMG_SIZE: 512
+  STEP: 1024
+  # PSEUDO_IDS: ["aa05346ff"]
+PREPAIRED:
+  CROP_PATH: "../input/train_1024_512"
+  BATCH_TARGET_WEIGHTS: [0.5, 0.5]
+TRAIN:
+  EPOCH: 80
+  ITERATIONS_PER_EPOCH: 50
+  BATCH_SIZE: 48
+  NUM_WORKERS: 32
+VAL:
+  BATCH_SIZE: 64
+
+OPTIMIZER:
+  NAME: "torch.optim.Adam"
+  CFG:
+    lr: 0.001
+  SCHEDULER:
+    NAME: "torch.optim.lr_scheduler.ReduceLROnPlateau"
+    CFG:
+      mode: "max"
+      patience: 5
+      factor: 0.5
+      verbose: true
+
+LOSS_FN: 
+  NAME: "src.losses.losses.MyLoss"
+
+MODEL:
+  TYPE: "Unet"
+  ENCODER: "resnet34"
+
+KEY_METRIC: "dice_mean"

@@ -1,0 +1,40 @@
+EXP_NAME: "1024_no_resize_pseudo_v1"
+DEBUG_MODE: false
+DATASET:
+  MODE: 'zarr_prepaired' 
+  CROP_SIZE: 1024
+  IMG_SIZE: 1024
+  STEP: 512
+  PSEUDO_IDS: ["aa05346ff", "d488c759a"]
+PREPAIRED:
+  CROP_PATH: "../input/train_v3_4096_1024"
+  BATCH_TARGET_WEIGHTS: [0.5, 0.5]
+TRAIN:
+  EPOCH: 60
+  ITERATIONS_PER_EPOCH: 50
+  BATCH_SIZE: 22
+  NUM_WORKERS: 20
+VAL:
+  BATCH_SIZE: 32
+
+OPTIMIZER:
+  NAME: "torch.optim.Adam"
+  CFG:
+    lr: 0.001
+  SCHEDULER:
+    NAME: "torch.optim.lr_scheduler.ReduceLROnPlateau"
+    CFG:
+      mode: "max"
+      patience: 5
+      factor: 0.5
+      verbose: true
+
+LOSS_FN: 
+  NAME: "src.losses.losses.MyLoss"
+
+MODEL:
+    CFG:
+      encoder_name: "resnet34"
+      encoder_weights: "imagenet"
+
+KEY_METRIC: "dice_mean"
