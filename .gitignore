@@ -1,6 +1,6 @@
 weights
 .vscode
 **/__pycache__
-notebooks
+notebooks/public_predicts
 **/.ipynb_checkpoints
 tensorboard

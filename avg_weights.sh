@@ -1,0 +1,1 @@
+python avg_checkpoits.py +exp=exp_16_1024_no_resize FOLD=1
