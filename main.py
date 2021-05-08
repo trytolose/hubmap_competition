@@ -32,6 +32,7 @@ from src.utils.checkpoint import CheckpointHandler
 from src.utils.utils import IMAGE_SIZES, get_lr
 from torch.utils.tensorboard import SummaryWriter
 from iterstrat.ml_stratifiers import MultilabelStratifiedKFold
+import sys
 
 FOLD_IMGS = {
     0: ["4ef6695ce", "0486052bb", "2f6ecfcdf"],
@@ -211,16 +212,26 @@ def main(cfg: DictConfig):
 
         df_train = zarr_ds.df.copy()
         df_train["back_prob"] = -1
-        counts = df_train["glomerulus_pix"].value_counts()
-        zero_gl = counts[0]
-        non_zero_gl = len(df_train) - zero_gl
-        sampler_weigths = cfg.PREPAIRED.BATCH_TARGET_WEIGHTS
-        df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (
-            1 / zero_gl
-        ) * sampler_weigths[0]
-        df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (
-            1 / non_zero_gl
-        ) * sampler_weigths[1]
+
+        df_train["density_cls"] = pd.cut(
+            df_train["glomerulus_pix"], 5, labels=np.arange(5)
+        )
+        prob_vc = df_train["density_cls"].value_counts()
+        for idx in prob_vc.index:
+            df_train.loc[df_train["density_cls"] == idx, "back_prob"] = 1 / prob_vc[idx]
+        # counts = df_train["glomerulus_pix"].value_counts()
+        # zero_gl = counts[0]
+        # non_zero_gl = len(df_train) - zero_gl
+        # sampler_weigths = cfg.PREPAIRED.BATCH_TARGET_WEIGHTS
+        # df_train.loc[df_train["glomerulus_pix"] == 0, "back_prob"] = (
+        #     1 / zero_gl
+        # ) * sampler_weigths[0]
+        # df_train.loc[df_train["glomerulus_pix"] != 0, "back_prob"] = (
+        #     1 / non_zero_gl
+        # ) * sampler_weigths[1]
+
+        # print(df_train["back_prob"].value_counts())
+        # sys.exit()
 
         sampler = WeightedRandomSampler(df_train["back_prob"].values, len(df_train))
 
